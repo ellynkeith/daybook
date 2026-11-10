@@ -242,6 +242,7 @@ class DemoStore:
                 "end_date": (today - timedelta(days=row["end"])).isoformat() if row["end"] is not None else None,
                 "category": row["category"],
                 "description": row["description"],
+                "exclude_from_insights": False,
             })
 
     def list_event_categories(self):
@@ -264,6 +265,7 @@ class DemoStore:
             "end_date": ev.end_date.isoformat() if ev.end_date else None,
             "category": ev.category,
             "description": ev.description,
+            "exclude_from_insights": ev.exclude_from_insights,
         }
 
     def create_context_event(self, ev: ContextEventIn):

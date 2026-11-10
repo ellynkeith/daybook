@@ -36,14 +36,27 @@ def _round(v, n=2):
     return round(v, n) if isinstance(v, float) else v
 
 
-def phase_line(result: Result, partial_day: str | None = None) -> dict:
+def phase_line(result: Result, partial_day: str | None = None, include_excluded: bool = False) -> dict:
     """Daily ratings, the 7-day phase line, context events and med changes.
 
     partial_day: a day still in progress (the app passes today). Its counts are
     incomplete, and a medication "stopped" on it only means today's doses
     aren't logged yet, so those are dropped.
+
+    include_excluded: days inside events marked "leave out of insights" (C02)
+    are blanked by default -- treated like days with nothing logged, so the
+    average neither uses them nor bridges across them. They stay on the
+    calendar. True plots them like any other day (for a look at what's hidden).
     """
     D = result.tables["days"].copy()
+    if "day_excluded" not in D:
+        D["day_excluded"] = False
+        D["day_exclude_reason"] = None
+    excl = D["day_excluded"].astype(bool)
+    hide = excl if not include_excluded else pd.Series(False, index=D.index)
+    for c in ("rating", "rating_filled"):
+        D.loc[hide, c] = float("nan")
+    D.loc[hide, "rating_imputed"] = False
     mean_all = D["rating_filled"].rolling(WINDOW, center=True, min_periods=MIN_DAYS).mean()
     mean_rated = D["rating"].rolling(WINDOW, center=True, min_periods=MIN_DAYS).mean()
     D["mean"] = mean_all
@@ -61,8 +74,10 @@ def phase_line(result: Result, partial_day: str | None = None) -> dict:
     out = {
         "window": WINDOW, "min_days": MIN_DAYS, "partial_day": partial_day,
         "days": [], "events": [], "med_changes": [],
+        "include_excluded": include_excluded,
         "summary": {"rated_days": int(D["rating"].notna().sum()),
                     "imputed_days": int(D["rating_imputed"].sum()),
+                    "excluded_days": int(excl.sum()),
                     "first_day": None, "last_day": None},
     }
     if not rated.any():
@@ -75,9 +90,12 @@ def phase_line(result: Result, partial_day: str | None = None) -> dict:
 
     prev = prev.loc[D.index]
     wake = wake.loc[D.index]
-    for (r, (_, p), w) in zip(D.itertuples(index=False), prev.iterrows(), wake):
+    # the night before a hidden day, or after one (its bedtime belongs to it), is hidden too
+    hide_night = (hide | hide.shift(1, fill_value=False)).loc[D.index]
+    hide = hide.loc[D.index]
+    for (r, (_, p), w, h, hn) in zip(D.itertuples(index=False), prev.iterrows(), wake, hide, hide_night):
         sleep = None
-        if pd.notna(p["bedtime_min"]) or pd.notna(p["fell_asleep_min"]) or pd.notna(w):
+        if not hn and (pd.notna(p["bedtime_min"]) or pd.notna(p["fell_asleep_min"]) or pd.notna(w)):
             sleep = {
                 "bed": _clean(p["bedtime_min"]),
                 "asleep": _clean(p["fell_asleep_min"]),
@@ -91,24 +109,31 @@ def phase_line(result: Result, partial_day: str | None = None) -> dict:
             "date": r.date,
             "rating": _clean(r.rating_filled),
             "imputed": bool(r.rating_imputed),
-            "mean": _round(r.mean),
-            "mean_rated": _round(r.mean_rated),
-            "n_negative": int(r.n_negative) if "n_negative" in D else 0,
-            "n_positive": int(r.n_positive) if "n_positive" in D else 0,
-            "max_intensity": _clean(getattr(r, "max_intensity", None)),
+            # no average ON a hidden day either: it would draw the line straight across the gap
+            "mean": None if h else _round(r.mean),
+            "mean_rated": None if h else _round(r.mean_rated),
+            "n_negative": None if h else (int(r.n_negative) if "n_negative" in D else 0),
+            "n_positive": None if h else (int(r.n_positive) if "n_positive" in D else 0),
+            "max_intensity": None if h else _clean(getattr(r, "max_intensity", None)),
             "partial": r.date == partial_day,
+            "excluded": bool(r.day_excluded),
+            "excluded_reason": _clean(r.day_exclude_reason) if r.day_excluded else None,
             "sleep": sleep,  # the night before this day; None if nothing logged
         })
 
     cd = result.tables["context_days"]
     if len(cd):
+        if "exclude" not in cd:
+            cd = cd.assign(exclude=False)
         ev = (cd.groupby("event_id")
                 .agg(start=("date", "min"), end=("date", "max"),
-                     category=("category", "first"), description=("description", "first"))
+                     category=("category", "first"), description=("description", "first"),
+                     exclude=("exclude", "first"))
                 .reset_index().sort_values(["start", "event_id"]))
         ev = ev[(ev["end"] >= first) & (ev["start"] <= last)]
         out["events"] = [{"start": r.start, "end": r.end, "category": r.category,
-                          "description": _clean(r.description)} for r in ev.itertuples(index=False)]
+                          "description": _clean(r.description), "exclude": bool(r.exclude)}
+                         for r in ev.itertuples(index=False)]
 
     mc = result.tables["med_changes"]
     if len(mc):

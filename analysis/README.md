@@ -62,6 +62,7 @@ many rows it touched, plus the pending decisions from the overrides file.
 | M02 | Dose times kept, analysed at clock-block level | Times are best-available (weekday AM doses given at school); not minute-accurate |
 | M03 | Regimen changes derived from the dose log | Marks dose changes even with no context event. A day logging a strict subset of the regimen counts as incomplete logging, not a change |
 | C01 | Context events → one row per day, inclusive | Blank end date = single day |
+| C02 | `days.day_excluded`: days inside a context event marked "leave out of insights" (reason in `day_exclude_reason`) | Stretches that aren't comparable (e.g. a trip abroad). Decided when the event is logged, never from how the numbers look. Flagged, not deleted; each analysis drops them and keeps them on the calendar so rolling windows don't bridge the gap |
 | D01 | One row per complete day; export day dropped | Partial days distort counts |
 | D02 | Good-day-only days → rating 4, `rating_imputed` | Dropping them biases toward bad days. Check every result with and without |
 | D03 | Sleep: missing stays missing; latency and duration derived; implausible latency (>120 min or <0) flagged | Night D = bedtime D → wake D+1; blank fell-asleep uses bedtime as onset (flagged) |
@@ -86,6 +87,9 @@ would produce, read with `load_tables`) and returns `insights.phase_line(result)
   days in the window, with and without imputed good-day-only days (D02). Same
   definition as the notebook.
 - Context events and medication changes (M03) in the plotted range.
+- Days flagged by C02 are blanked (no rating, average, counts or sleep, including the night
+  after the last one), kept on the calendar, and drawn as a hatched band.
+  `phase_line(..., include_excluded=True)` plots them normally, for a look at what's hidden.
 - Sleep for each day is **the night before it** (bedtime D-1 → wake D, the same alignment as
   `sleep_prev_night_hr`), so a rough night sits under the day that followed. Clock values are
   minutes after midnight of the evening's date; nights with implausible latency (D03) are flagged.

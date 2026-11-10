@@ -240,7 +240,7 @@ def list_context_events(request: Request):
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, start_date, end_date, category, description, created_at "
+                "SELECT id, start_date, end_date, category, description, exclude_from_insights, created_at "
                 "FROM context_events ORDER BY start_date DESC, id DESC"
             )
             return cur.fetchall()
@@ -254,11 +254,11 @@ def create_context_event(ev: ContextEventIn, request: Request):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                INSERT INTO context_events (start_date, end_date, category, description)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO context_events (start_date, end_date, category, description, exclude_from_insights)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING *
                 """,
-                (ev.start_date, ev.end_date, ev.category, ev.description),
+                (ev.start_date, ev.end_date, ev.category, ev.description, ev.exclude_from_insights),
             )
             row = cur.fetchone()
             # Keep the category list in step with what's used.
@@ -282,11 +282,12 @@ def update_context_event(event_id: int, ev: ContextEventIn, request: Request):
             cur.execute(
                 """
                 UPDATE context_events
-                SET start_date = %s, end_date = %s, category = %s, description = %s
+                SET start_date = %s, end_date = %s, category = %s, description = %s,
+                    exclude_from_insights = %s
                 WHERE id = %s
                 RETURNING *
                 """,
-                (ev.start_date, ev.end_date, ev.category, ev.description, event_id),
+                (ev.start_date, ev.end_date, ev.category, ev.description, ev.exclude_from_insights, event_id),
             )
             row = cur.fetchone()
         conn.commit()
@@ -702,7 +703,7 @@ EXPORT_TABLES = {
     ),
     "context_events.csv": (
         "context_events",
-        ["id", "start_date", "end_date", "category", "description", "created_at"],
+        ["id", "start_date", "end_date", "category", "description", "exclude_from_insights", "created_at"],
         "start_date, id",
     ),
     "medication_doses.csv": (
@@ -815,7 +816,7 @@ def _real_overrides():
 
 
 @router.get("/api/insights")
-def insights(request: Request, today: Optional[str] = None):
+def insights(request: Request, today: Optional[str] = None, include_excluded: bool = False):
     # Imported here, not at module load: pandas is slow to import and only
     # this route needs it, so app startup (and Render's health check) stays fast.
     from analysis.tracker_analysis import Overrides, Params, build, load_tables, phase_line
@@ -834,4 +835,5 @@ def insights(request: Request, today: Optional[str] = None):
     if not any(len(raw[t]) for t in ("entries", "daily", "wetting_incidents", "medication_doses")):
         return {"phase": None, "overrides": ov_status}
     result = build(raw, ov, Params(through=today))
-    return {"phase": phase_line(result, partial_day=today), "overrides": ov_status}
+    return {"phase": phase_line(result, partial_day=today, include_excluded=include_excluded),
+            "overrides": ov_status}

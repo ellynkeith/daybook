@@ -288,6 +288,9 @@ class ContextEventIn(BaseModel):
     end_date: Optional[date] = None
     category: str
     description: Optional[str] = None
+    # Leave these days out of Insights (e.g. a trip that isn't comparable).
+    # The days' data is kept; only the analysis skips them.
+    exclude_from_insights: bool = False
 
     @field_validator("category")
     @classmethod

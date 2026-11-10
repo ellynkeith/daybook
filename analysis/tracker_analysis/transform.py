@@ -296,13 +296,16 @@ class _Builder:
     # ---- context
     def context(self):
         c = self.raw["context_events"].copy()
+        if len(c) and "exclude_from_insights" not in c:  # exports from before 2026-11-10
+            c["exclude_from_insights"] = ""
         rows = []
         for _, r in c.iterrows():
             end = r["end_date"] or r["start_date"]
             for dd in pd.date_range(r["start_date"], end):
                 rows.append({"date": dd.date().isoformat(), "category": r["category"],
-                             "description": r["description"] or None, "event_id": r["id"]})
-        cd = pd.DataFrame(rows, columns=["date", "category", "description", "event_id"])
+                             "description": r["description"] or None, "event_id": r["id"],
+                             "exclude": str(r["exclude_from_insights"]).lower() == "true"})
+        cd = pd.DataFrame(rows, columns=["date", "category", "description", "event_id", "exclude"])
         self.rec("C01", "Expand context events to one row per day",
                  "Start and end dates are inclusive; a blank end date means a single day.", len(cd),
                  f"{int((c['description'] == '').sum()) if len(c) else 0} events have no description")
@@ -415,6 +418,20 @@ class _Builder:
         brk = D.get(f"ctx_{_slug(SCHOOL_BREAK)}", pd.Series(False, index=D.index))
         D["is_school_day"] = ~D["weekday"].isin(["Saturday", "Sunday"]) & ~brk
         D["imputed_no_entries"] = D["rating_imputed"] & (D["n_entries"] == 0)
+
+        # C02: days covered by a context event marked "leave out of insights".
+        # Flagged, never blanked here: the data stays in every table, and each
+        # analysis decides to drop day_excluded rows (phase_line does).
+        ex = cd[cd["exclude"].astype(bool)]
+        D["day_excluded"] = D["date"].isin(ex["date"])
+        D["day_exclude_reason"] = D["date"].map(
+            ex.assign(r=ex["description"].fillna(ex["category"])).groupby("date")["r"].agg("; ".join))
+        self.rec("C02", "Flag days inside events marked 'leave out of insights'",
+                 "Some stretches aren't comparable with ordinary days (e.g. a trip abroad: different "
+                 "caregiver, time zone and routine). The reason is decided when the event is logged, never "
+                 "from how the numbers look. Days are flagged, not deleted, and stay on the calendar so a "
+                 "rolling window never bridges the gap.", int(D["day_excluded"].sum()),
+                 f"reasons: {sorted(set(D['day_exclude_reason'].dropna()))}")
         self.rec("D05", "Join entries, wetting, doses and context onto days",
                  "Excluded records are left out of counts. imputed_no_entries marks days where 'good day' and "
                  "'no entries' are the same backfilled fact, not two independent signals. is_school_day = "

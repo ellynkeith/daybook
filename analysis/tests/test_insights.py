@@ -46,14 +46,14 @@ class PhaseLineTests(unittest.TestCase):
         self.assertEqual(mid["mean"], round((4 * 6 + 2) / 7, 2))
         self.assertIsNone(mid["mean_rated"])  # one real rating < 4 needed
         self.assertTrue(out["days"][0]["imputed"])
-        self.assertEqual(out["summary"], {"rated_days": 1, "imputed_days": 6,
+        self.assertEqual(out["summary"], {"rated_days": 1, "imputed_days": 6, "excluded_days": 0,
                                           "first_day": "2026-03-01", "last_day": "2026-03-07"})
 
     def test_starts_at_first_rating_and_clips_events(self):
         out = self.phase(["", "", "3", "3"], "2026-03-04")
         self.assertEqual(out["days"][0]["date"], "2026-03-03")
         self.assertEqual(out["events"], [{"start": "2026-03-03", "end": "2026-03-04",
-                                          "category": "illness", "description": "cold"}])
+                                          "category": "illness", "description": "cold", "exclude": False}])
 
     def test_no_ratings_is_empty_not_error(self):
         out = self.phase(["", ""], "2026-03-02")
@@ -106,3 +106,62 @@ class LoadAndOverrideTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExcludedPeriodTests(unittest.TestCase):
+    """Context events marked "leave out of insights" (step C02)."""
+    CX = C_COLS[:5] + ["exclude_from_insights", "created_at"]
+
+    def build(self, ratings, sleep=None, flag="true"):
+        r = raw(ratings, sleep=sleep)
+        r["context_events"] = df([["1", "2026-03-05", "2026-03-07", "visitors/travel", "trip", flag,
+                                   "2026-03-01 00:00:00+00:00"]], self.CX)
+        return build(r, Overrides(), Params(through=f"2026-03-{len(ratings):02d}"))
+
+    def test_transform_flags_but_keeps_data(self):
+        res = self.build(["3"] * 10)
+        days = res.tables["days"].set_index("date")
+        self.assertEqual(days.index[days["day_excluded"]].tolist(), ["2026-03-05", "2026-03-06", "2026-03-07"])
+        self.assertEqual(days.loc["2026-03-06", "day_exclude_reason"], "trip")
+        self.assertEqual(days.loc["2026-03-06", "rating"], 3)  # kept in the table
+        self.assertEqual(next(s for s in res.log if s.id == "C02").rows, 3)
+
+    def test_unflagged_and_old_exports_exclude_nothing(self):
+        self.assertFalse(self.build(["3"] * 10, flag="false").tables["days"]["day_excluded"].any())
+        old = build(raw(["3"] * 5), Overrides(), Params(through="2026-03-05"))  # no exclude column at all
+        self.assertFalse(old.tables["days"]["day_excluded"].any())
+
+    def test_phase_line_blanks_days_and_never_bridges(self):
+        # high before the trip, low after: a window must not average across the gap
+        ratings = ["5", "5", "5", "5", "2", "2", "2", "1", "1", "1", "1"]
+        out = phase_line(self.build(ratings))
+        d = {x["date"]: x for x in out["days"]}
+        for day in ("2026-03-05", "2026-03-06", "2026-03-07"):
+            self.assertIsNone(d[day]["rating"])
+            self.assertIsNone(d[day]["n_negative"])
+            self.assertTrue(d[day]["excluded"])
+            self.assertEqual(d[day]["excluded_reason"], "trip")
+        # no average on the hidden days themselves, so the line can't cross the gap
+        self.assertIsNone(d["2026-03-07"]["mean"])
+        # 03-08's window (03-05..03-11) reaches back into the trip but only uses days after it
+        self.assertEqual(d["2026-03-08"]["mean"], 1.0)
+        self.assertEqual(d["2026-03-04"]["mean"], round((5 * 4) / 4, 2))
+        self.assertEqual(out["summary"]["excluded_days"], 3)
+        self.assertEqual(out["summary"]["rated_days"], 8)
+        self.assertTrue(out["events"][0]["exclude"])
+
+    def test_include_excluded_shows_everything(self):
+        out = phase_line(self.build(["5"] * 4 + ["2"] * 3 + ["1"] * 4), include_excluded=True)
+        d = {x["date"]: x for x in out["days"]}
+        self.assertEqual(d["2026-03-06"]["rating"], 2)
+        self.assertTrue(d["2026-03-06"]["excluded"])  # still marked, just plotted
+        self.assertEqual(out["summary"]["rated_days"], 11)
+
+    def test_night_after_excluded_day_is_hidden(self):
+        sleep = {i: ("07:00:00", "21:00:00", "21:30:00") for i in range(10)}
+        d = {x["date"]: x for x in phase_line(self.build(["3"] * 10, sleep=sleep))["days"]}
+        self.assertIsNone(d["2026-03-06"]["sleep"])   # night inside the trip
+        self.assertIsNone(d["2026-03-08"]["sleep"])   # bedtime on 03-07 was still on the trip
+        self.assertIsNotNone(d["2026-03-09"]["sleep"])
+        self.assertIsNone(d["2026-03-05"]["sleep"])     # ends on the trip's first morning
+        self.assertIsNotNone(d["2026-03-04"]["sleep"])  # last night before the trip

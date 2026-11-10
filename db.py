@@ -221,6 +221,13 @@ def init_db():
                 )
                 """
             )
+            # Added 2026-11-10: lets an event (e.g. a trip) mark its days as
+            # not comparable, so Insights leaves them out. Nothing is deleted;
+            # the analysis code reads this flag (step C02).
+            cur.execute(
+                "ALTER TABLE context_events ADD COLUMN IF NOT EXISTS "
+                "exclude_from_insights BOOLEAN NOT NULL DEFAULT false"
+            )
             for ev in DEFAULT_EVENT_CATEGORIES:
                 cur.execute(
                     "INSERT INTO event_categories (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
