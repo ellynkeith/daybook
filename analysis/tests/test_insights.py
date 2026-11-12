@@ -82,6 +82,24 @@ class PhaseLineTests(unittest.TestCase):
         self.assertTrue(d3["sleep"]["onset_is_bedtime"])
         self.assertEqual(d3["sleep"]["hours"], 5.5)        # 00:30 -> 06:00
 
+    def test_wetting_by_day(self):
+        r = raw(["3", "3", "3"])
+        r["wetting_incidents"] = df([
+            ["1", "2026-03-02", "15:30:00", "true", "school", "noncompliant", "", "2026-03-02 21:00:00+00:00"],
+            ["2", "2026-03-02", "09:00:00", "", "home", "compliant", "", "2026-03-02 15:00:00+00:00"],
+            ["3", "2026-03-03", "", "", "home", "not observed", "", "2026-03-03 15:00:00+00:00"],
+            ["4", "2026-03-03", "10:00:00", "false", "home", "compliant", "", "2026-03-03 15:00:00+00:00"]], W_COLS)
+        res = build(r, Overrides(wetting_exclude={"4": "overnight"}), Params(through="2026-03-03"))
+        d = {x["date"]: x for x in phase_line(res)["days"]}
+        self.assertEqual(d["2026-03-01"]["wetting"], [])
+        self.assertEqual([w["time"] for w in d["2026-03-02"]["wetting"]], ["09:00", "15:30"])  # in time order
+        self.assertEqual(d["2026-03-02"]["wetting"][1],
+                         {"time": "15:30", "basis": "noticed", "basis_assumed": False,
+                          "response": "noncompliant", "setting": "school"})
+        self.assertTrue(d["2026-03-02"]["wetting"][0]["basis_assumed"])     # unknown -> noticed (W02)
+        self.assertEqual(len(d["2026-03-03"]["wetting"]), 1)                 # id 4 excluded (W03)
+        self.assertIsNone(d["2026-03-03"]["wetting"][0]["time"])
+
     def test_counts_and_json_safe(self):
         out = self.phase(["3", "3"], "2026-03-02")
         self.assertEqual(out["days"][1]["n_negative"], 1)
@@ -139,6 +157,7 @@ class ExcludedPeriodTests(unittest.TestCase):
         for day in ("2026-03-05", "2026-03-06", "2026-03-07"):
             self.assertIsNone(d[day]["rating"])
             self.assertIsNone(d[day]["n_negative"])
+            self.assertIsNone(d[day]["wetting"])
             self.assertTrue(d[day]["excluded"])
             self.assertEqual(d[day]["excluded_reason"], "trip")
         # no average on the hidden days themselves, so the line can't cross the gap
@@ -162,6 +181,8 @@ class ExcludedPeriodTests(unittest.TestCase):
         d = {x["date"]: x for x in phase_line(self.build(["3"] * 10, sleep=sleep))["days"]}
         self.assertIsNone(d["2026-03-06"]["sleep"])   # night inside the trip
         self.assertIsNone(d["2026-03-08"]["sleep"])   # bedtime on 03-07 was still on the trip
+        self.assertTrue(d["2026-03-08"]["sleep_left_out"])  # so the readout can say why
+        self.assertFalse(d["2026-03-09"]["sleep_left_out"])
         self.assertIsNotNone(d["2026-03-09"]["sleep"])
         self.assertIsNone(d["2026-03-05"]["sleep"])     # ends on the trip's first morning
         self.assertIsNotNone(d["2026-03-04"]["sleep"])  # last night before the trip

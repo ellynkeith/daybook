@@ -109,7 +109,13 @@
     --chart-bar: #c9783a;
     --chart-grid: #e7dfcf;
     --chart-sleep: #6a64c4;
+    --chart-wet: #b0447a;
   }
+  .panel-toggles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 0.8rem; color: var(--ink-soft); }
+  .panel-toggles .chip { padding: 3px 11px; font-size: 0.8rem; }
+  .chart-panel[hidden] { display: none; }
+  .chart-label svg { vertical-align: -1px; margin: 0 3px 0 4px; }
+  .chart-label .nw { white-space: nowrap; }
   .insight-card { position: relative; margin-bottom: 28px; }
   .insight-title { font-size: 1.15rem; margin-bottom: 2px; }
   .insight-sub { margin: 0 0 12px; font-size: 0.85rem; color: var(--ink-soft); }
@@ -902,6 +908,14 @@
           <button type="button" data-range="all" aria-pressed="false">All</button>
         </div>
       </div>
+      <div class="panel-toggles" id="panelToggles" role="group" aria-label="Charts to show">
+        Show
+        <button type="button" class="chip selected" data-panel="rating" aria-pressed="true">Day rating</button>
+        <button type="button" class="chip selected" data-panel="entries" aria-pressed="true">Behavior</button>
+        <button type="button" class="chip selected" data-panel="wetting" aria-pressed="true">Wetting</button>
+        <button type="button" class="chip selected" data-panel="sleep" aria-pressed="true">Sleep</button>
+      </div>
+      <div class="chart-panel" data-panel="rating">
       <div class="legend" aria-hidden="true">
         <span><svg width="18" height="8"><line x1="1" y1="4" x2="17" y2="4" stroke="var(--chart-avg)" stroke-width="2" stroke-linecap="round"/></svg>7-day average</span>
         <span><svg width="18" height="8"><line x1="1" y1="4" x2="17" y2="4" stroke="var(--ink-soft)" stroke-width="1.5" stroke-linecap="round"/></svg>average, rated days only</span>
@@ -912,10 +926,19 @@
         <span><svg width="10" height="10"><path d="M1 1 L9 1 L5 6 Z" fill="var(--ink-soft)"/><line x1="5" y1="6" x2="5" y2="10" stroke="var(--ink-soft)"/></svg>medication change</span>
       </div>
       <div class="chart" id="phaseChart" tabindex="0" role="img" aria-label="Day rating chart. Use the left and right arrow keys to step through days."></div>
+      </div>
+      <div class="chart-panel" data-panel="entries">
       <div class="chart-label">Behavior entries per day (good-behavior entries not counted)</div>
-      <div class="chart" id="entriesChart" aria-hidden="true"></div>
+      <div class="chart" id="entriesChart" tabindex="0" role="img" aria-label="Behavior entries per day. Arrow keys step through days."></div>
+      </div>
+      <div class="chart-panel" data-panel="wetting">
+      <div class="chart-label">Wetting incidents, one dot each: <span class="nw"><svg width="9" height="9"><circle cx="4.5" cy="4.5" r="4" fill="var(--chart-wet)"/></svg>resisted changing</span> <span class="nw"><svg width="9" height="9"><circle cx="4.5" cy="4.5" r="3.5" fill="var(--chart-wet)" fill-opacity="0.35" stroke="var(--chart-wet)" stroke-width="1"/></svg>changed without a fight</span> <span class="nw"><svg width="9" height="9"><circle cx="4.5" cy="4.5" r="3.4" fill="var(--paper)" stroke="var(--chart-wet)" stroke-width="1.5"/></svg>not seen / other</span></div>
+      <div class="chart" id="wettingChart" tabindex="0" role="img" aria-label="Wetting incidents per day. Arrow keys step through days."></div>
+      </div>
+      <div class="chart-panel" data-panel="sleep">
       <div class="chart-label">Sleep the night before: bar = asleep → woke up, thin line = in bed, not yet asleep</div>
-      <div class="chart" id="sleepChart" aria-hidden="true"></div>
+      <div class="chart" id="sleepChart" tabindex="0" role="img" aria-label="Sleep the night before each day. Arrow keys step through days."></div>
+      </div>
       <div class="chart-tip" id="chartTip" aria-live="polite"></div>
       <p class="insight-note" id="phaseNote"></p>
       <details class="insight-table">
@@ -3216,6 +3239,35 @@ const insightsStatus = document.getElementById('insightsStatus');
 const phaseChartEl = document.getElementById('phaseChart');
 const entriesChartEl = document.getElementById('entriesChart');
 const sleepChartEl = document.getElementById('sleepChart');
+const wettingChartEl = document.getElementById('wettingChart');
+const CHART_ELS = [phaseChartEl, entriesChartEl, wettingChartEl, sleepChartEl];
+
+// Which charts are shown: a per-viewer convenience, remembered in this browser.
+const PANELS = ['rating', 'entries', 'wetting', 'sleep'];
+let shownPanels = new Set(PANELS);
+try {
+  const saved = JSON.parse(localStorage.getItem('insightsPanels') || 'null');
+  if (Array.isArray(saved)) shownPanels = new Set(saved.filter(p => PANELS.includes(p)));
+} catch (e) { /* storage unavailable: show everything */ }
+function applyPanels() {
+  for (const el of document.querySelectorAll('.chart-panel')) el.hidden = !shownPanels.has(el.dataset.panel);
+  for (const b of document.querySelectorAll('#panelToggles .chip')) {
+    const on = shownPanels.has(b.dataset.panel);
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+}
+document.getElementById('panelToggles').addEventListener('click', ev => {
+  const b = ev.target.closest('.chip[data-panel]');
+  if (!b) return;
+  const p = b.dataset.panel;
+  if (shownPanels.has(p)) shownPanels.delete(p); else shownPanels.add(p);
+  try { localStorage.setItem('insightsPanels', JSON.stringify([...shownPanels])); } catch (e) { /* fine */ }
+  applyPanels();
+  // a chart drawn while hidden has no width to measure, so redraw once it's visible
+  if (insightsData) renderInsights();
+});
+applyPanels();
 const chartTip = document.getElementById('chartTip');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let insightsData = null;
@@ -3283,7 +3335,8 @@ function renderInsights() {
   const meds = phase.med_changes.filter(m => m.date >= first && m.date <= last);
   const idx = {}; days.forEach((d, i) => { idx[d.date] = i; });
 
-  const W = Math.max(phaseChartEl.clientWidth, 280);
+  // the card, not one chart: a hidden panel measures 0 wide
+  const W = Math.max(phaseCard.clientWidth, 280);
   const left = 24, right = 6;
   const n = days.length;
   const step = (W - left - right) / n;
@@ -3412,6 +3465,29 @@ function renderInsights() {
   });
   crosshairs.push(svgEl('line', { x1: 0, x2: 0, y1: top2, y2: top2 + plotH2, stroke: 'var(--ink)', 'stroke-width': 1, opacity: 0, 'pointer-events': 'none' }, svg2));
 
+  // -------- wetting: one dot per incident, stacked; fill = how changing went
+  wettingChartEl.innerHTML = '';
+  {
+    const maxW = Math.max(2, ...days.map(d => (d.wetting || []).length));
+    const rowH = 12, top4 = 6, bottom4 = 4, H4 = top4 + rowH * maxW + bottom4;
+    const svg4 = svgEl('svg', { viewBox: `0 0 ${W} ${H4}`, height: H4 }, wettingChartEl);
+    drawLeftOut(svg4, top4, rowH * maxW, false);
+    svgEl('line', { x1: left, x2: W - right, y1: top4 + rowH * maxW, y2: top4 + rowH * maxW, stroke: 'var(--chart-grid)', 'stroke-width': 1 }, svg4);
+    const r4 = Math.max(3, Math.min(4.5, step / 2 - 0.5));
+    days.forEach((d, i) => {
+      (d.wetting || []).forEach((w, k) => {
+        const cx = xc(i), cy = top4 + rowH * maxW - rowH * (k + 0.5);
+        if (w.response === 'noncompliant')
+          svgEl('circle', { cx, cy, r: r4, fill: 'var(--chart-wet)', stroke: 'var(--paper)', 'stroke-width': 1.5, 'paint-order': 'stroke' }, svg4);
+        else if (w.response === 'compliant')
+          svgEl('circle', { cx, cy, r: r4 - 0.5, fill: 'var(--chart-wet)', 'fill-opacity': 0.35, stroke: 'var(--chart-wet)', 'stroke-width': 1 }, svg4);
+        else
+          svgEl('circle', { cx, cy, r: r4 - 0.6, fill: 'var(--paper)', stroke: 'var(--chart-wet)', 'stroke-width': 1.5 }, svg4);
+      });
+    });
+    crosshairs.push(svgEl('line', { x1: 0, x2: 0, y1: top4, y2: top4 + rowH * maxW, stroke: 'var(--ink)', 'stroke-width': 1, opacity: 0, 'pointer-events': 'none' }, svg4));
+  }
+
   // -------- sleep chart: the night before each day, on a clock axis.
   // Clock values are minutes after midnight of the previous evening's date,
   // so 21:00 = 1260 and 07:00 next morning = 1860.
@@ -3501,7 +3577,8 @@ function fmtHours(h) {
 }
 
 // Readout lines for the night before a day: [label, value, muted]
-function sleepText(s) {
+function sleepText(s, d) {
+  if (!s && d && d.sleep_left_out) return [['Sleep', 'left out: the night before was part of a left-out stretch', true]];
   if (!s) return [['Sleep', 'nothing logged the night before', true]];
   const out = [];
   const onset = s.asleep != null ? s.asleep : s.bed;
@@ -3513,6 +3590,14 @@ function sleepText(s) {
   if (s.latency != null && s.bed != null && !s.flagged) out.push(['In bed', `${fmtClockMin(s.bed)}, asleep after ${Math.round(s.latency)} min`, true]);
   if (s.flagged) out.push(['Check', `${Math.round(s.latency)} min from bed to asleep looks off. Worth checking that night's times.`]);
   return out;
+}
+
+const WET_RESPONSE = { compliant: 'changed without a fight', noncompliant: 'resisted changing',
+                      'not observed': 'not seen', other: 'other' };
+function wettingText(w) {
+  const t = w.time ? fmtClockMin(+w.time.slice(0, 2) * 60 + +w.time.slice(3, 5)) : 'time not logged';
+  const basis = !w.time ? '' : w.basis_assumed ? ' (happened or noticed: not recorded)' : w.basis === 'noticed' ? ' (when noticed)' : '';
+  return [t + basis, w.setting, WET_RESPONSE[w.response] || w.response].filter(Boolean).join(' · ');
 }
 
 function medText(m) {
@@ -3545,7 +3630,11 @@ function showTip(i) {
   if (d.excluded) line('Left out of insights', (d.excluded_reason || 'marked in the context log') +
                        (insightsData.phase.include_excluded ? ' (shown because "Show left-out days" is on)' : ''), true);
   if (d.n_negative != null) line('Behavior entries', d.n_negative + (d.max_intensity != null ? ` (max intensity ${d.max_intensity})` : ''));
-  if (!hidden) for (const t of sleepText(d.sleep)) line(t[0], t[1], t[2]);
+  if (d.wetting) {
+    if (!d.wetting.length) line('Wetting', 'none logged', true);
+    for (const w of d.wetting) line('Wetting', wettingText(w));
+  }
+  if (!hidden) for (const t of sleepText(d.sleep, d)) line(t[0], t[1], t[2]);
   for (const e of ev) line('Context', e.category + (e.description ? ': ' + e.description : ''));
   for (const m of md) line('Medication', medText(m));
 
@@ -3572,23 +3661,24 @@ function indexFromPointer(ev, el) {
   return Math.floor(((ev.clientX - r.left) / scale - left) / step);
 }
 
-for (const el of [phaseChartEl, entriesChartEl, sleepChartEl]) {
+for (const el of CHART_ELS) {
   el.addEventListener('pointermove', ev => { if (chartView) showTip(indexFromPointer(ev, el)); });
   el.addEventListener('pointerdown', ev => { if (chartView) showTip(indexFromPointer(ev, el)); });
   el.addEventListener('pointerleave', ev => { if (ev.pointerType === 'mouse') hideTip(); });
+  // keyboard: any chart can step through days, so hiding one panel doesn't lose it
+  el.addEventListener('keydown', ev => {
+    if (!chartView) return;
+    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+      ev.preventDefault();
+      const start = tipIndex == null ? chartView.days.length - 1 : tipIndex + (ev.key === 'ArrowLeft' ? -1 : 1);
+      showTip(start);
+    } else if (ev.key === 'Escape') hideTip();
+  });
+  el.addEventListener('blur', ev => { if (!CHART_ELS.includes(ev.relatedTarget)) hideTip(); });
 }
-phaseChartEl.addEventListener('keydown', ev => {
-  if (!chartView) return;
-  if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-    ev.preventDefault();
-    const start = tipIndex == null ? chartView.days.length - 1 : tipIndex + (ev.key === 'ArrowLeft' ? -1 : 1);
-    showTip(start);
-  } else if (ev.key === 'Escape') hideTip();
-});
-phaseChartEl.addEventListener('blur', hideTip);
 // Tapping anywhere else on the page closes the tooltip on touch screens.
 document.addEventListener('pointerdown', ev => {
-  if (tipIndex != null && ![phaseChartEl, entriesChartEl, sleepChartEl].some(el => el.contains(ev.target))) hideTip();
+  if (tipIndex != null && !CHART_ELS.some(el => el.contains(ev.target))) hideTip();
 });
 
 document.getElementById('showExcludedInput').addEventListener('change', loadInsights);
@@ -3613,7 +3703,7 @@ function renderPhaseTable(days, events, meds) {
   wrap.textContent = '';
   const table = document.createElement('table');
   const head = table.createTHead().insertRow();
-  for (const [h, num] of [['Day', false], ['Rating', true], ['7-day avg', true], ['Rated only', true], ['Entries', true], ['Sleep before', true], ['Context / meds', false]]) {
+  for (const [h, num] of [['Day', false], ['Rating', true], ['7-day avg', true], ['Rated only', true], ['Entries', true], ['Wetting', true], ['Sleep before', true], ['Context / meds', false]]) {
     const th = document.createElement('th'); th.textContent = h; if (num) th.className = 'num'; head.append(th);
   }
   const body = table.createTBody();
@@ -3625,6 +3715,7 @@ function renderPhaseTable(days, events, meds) {
       [fmtShortDay(d.date) + (d.partial ? ' (today)' : ''), false],
       [d.excluded && !insightsData.phase.include_excluded ? 'left out' : (d.rating == null ? '–' : (d.imputed ? '4*' : String(d.rating))), true],
       [fmtNum(d.mean), true], [fmtNum(d.mean_rated), true], [d.n_negative == null ? '–' : String(d.n_negative), true],
+      [d.wetting == null ? '–' : String(d.wetting.length), true],
       [d.sleep && d.sleep.hours != null ? fmtHours(d.sleep.hours) + (d.sleep.flagged ? ' ?' : '') : '–', true],
       [[...ev.map(e => e.category + (e.description ? ': ' + e.description : '')), ...md.map(medText)].join('; '), false],
     ];

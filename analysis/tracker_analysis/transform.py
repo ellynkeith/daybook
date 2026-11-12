@@ -43,6 +43,7 @@ class Params:
     time_default_until: str = "2026-10-16"     # E06: entry time defaulted to "now" before this date
     time_default_window_min: float = 3.0       # E06
     latency_implausible_min: float = 120.0     # D03
+    subset_change_days: int = 7                # M03: a dose missing this many logged days running = stopped
     through: str | None = None                 # last complete day; None -> inferred (D01)
 
 
@@ -265,23 +266,44 @@ class _Builder:
 
         # regimen = set of (amount, unit, formulation) recorded for a drug on a day (skipped included:
         # a skipped dose still says what the regimen was). A day whose set is a strict subset of the
-        # running regimen is treated as incomplete logging, not a change.
+        # running regimen is usually incomplete logging, not a change -- but if part of the regimen is
+        # missing on `subset_change_days` logged days in a row, it has stopped (e.g. a short-acting dose
+        # dropped while the long-acting one of the same drug continues). That change is dated to the
+        # first logged day without it: the true date is somewhere between that and the last day with it.
         changes = []
+        n_sustained = 0
         for drug, g in d.groupby("drug"):
             by_day = g.groupby("entry_date").apply(
                 lambda x: frozenset(zip(x["amount"].fillna(-1.0), x["unit"].fillna(""), x["formulation"].fillna(""))),
                 include_groups=False
             ).sort_index()
             cur = None
+            absent = {}  # dose in cur -> logged days missing in a row, and the first of them
             for day, reg in by_day.items():
                 if cur is None:
                     cur = reg
                     if day > d["entry_date"].min():
                         changes.append((day, drug, "started", "", _fmt(reg)))
                     continue
-                if reg != cur and not reg < cur:
-                    changes.append((day, drug, "changed", _fmt(cur), _fmt(reg)))
-                    cur = reg
+                if reg <= cur:
+                    # partial day: count how long each dose of the regimen has been missing
+                    for dose in cur:
+                        if dose in reg:
+                            absent.pop(dose, None)
+                        else:
+                            k, first = absent.get(dose, (0, day))
+                            absent[dose] = (k + 1, first)
+                    gone = {x for x, (k, _) in absent.items() if k >= self.p.subset_change_days}
+                    if gone and gone != cur:
+                        when = min(absent[x][1] for x in gone)
+                        new = cur - gone
+                        changes.append((when, drug, "changed", _fmt(cur), _fmt(new)))
+                        cur, absent = new, {}
+                        n_sustained += 1
+                    continue
+                absent = {}
+                changes.append((day, drug, "changed", _fmt(cur), _fmt(reg)))
+                cur = reg
             last = by_day.index.max()
             if last < self.through:
                 stop = (date.fromisoformat(last) + timedelta(days=1)).isoformat()
@@ -289,7 +311,9 @@ class _Builder:
         mc = pd.DataFrame(changes, columns=["date", "drug", "change", "from", "to"]).sort_values("date")
         self.rec("M03", "Detect regimen changes from the dose log",
                  "Dose changes are prime suspects for phase shifts. Deriving them from the dose log means "
-                 "they're marked even when no context event was added.", len(mc))
+                 "they're marked even when no context event was added. Part of a regimen missing for a day "
+                 f"or two is incomplete logging; missing {self.p.subset_change_days} logged days running, it "
+                 "has stopped.", len(mc), f"{n_sustained} change(s) found by the sustained-absence rule")
         self.t["doses"] = d.reset_index(drop=True)
         self.t["med_changes"] = mc.reset_index(drop=True)
 

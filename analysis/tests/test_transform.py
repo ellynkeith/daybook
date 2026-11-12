@@ -123,6 +123,23 @@ class TransformTests(unittest.TestCase):
         supp = mc[mc["drug"] == "supp"]
         self.assertEqual(supp["change"].tolist(), ["stopped"])
 
+    def test_sustained_partial_regimen_is_a_change(self):
+        """Two formulations of one drug; the short one drops out. A day or two without it is incomplete
+        logging; a week without it (while the other continues) is a real change."""
+        def run(days_without):
+            rows = []
+            for i in range(3 + days_without):
+                day = f"2026-02-{i + 1:02d}"
+                meds = "drugA 10mg (short); drugA 18mg (long)" if i < 3 else "drugA 18mg (long)"
+                rows.append([str(i + 1), day, "08:00:00", "", meds, "false", "", f"{day} 13:00:00+00:00"])
+            r = raw(); r["medication_doses"] = df(rows, M_COLS)
+            last = f"2026-02-{3 + days_without:02d}"
+            return build(r, Overrides(), Params(through=last)).tables["med_changes"]
+        self.assertEqual(run(2)["change"].tolist(), [])            # a gap in logging, not a change
+        mc = run(7)
+        self.assertEqual(mc[["date", "change", "from", "to"]].values.tolist(),
+                         [["2026-02-04", "changed", "18mg long+10mg short", "18mg long"]])
+
     def test_context_inclusive_and_school_day(self):
         d = self.days
         self.assertTrue(d.loc["2026-01-05", "is_school_day"])     # Monday

@@ -31,6 +31,7 @@ Live at [behavior-tracker-st8g.onrender.com](https://behavior-tracker-st8g.onren
 - [x] Tabs: Log, History and Insights, with the tab in the URL so refresh, bookmarks and the back button keep your place
 - [x] Insights, phase line: the day rating's 7-day average (with and without "good day"-only days), daily behavior-entry counts, the night before each day's sleep (bedtime, falling asleep, waking), context events and medication changes on one timeline; recomputed every time the tab opens, with a table view
 - [x] Leave out of Insights: a context event (say, a trip abroad) can be marked so its days are left out of every average. The data is kept, the days show as a hatched gap rather than being joined across, and a toggle shows them again
+- [x] Insights, wetting: one dot per incident on the same timeline, filled by how changing went (resisted, changed without a fight, not seen), with time, setting and happened/noticed in the day readout. Each chart (day rating, behavior, wetting, sleep) can be shown or hidden
 - [ ] More insights: frequency by category, trends by setting or time of day, common situations/demands, correlations with sleep and medication timing
 - [ ] Automated Backups: beyond the manual CSV export
 - [ ] Per-Person Accounts: currently one shared household login

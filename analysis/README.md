@@ -60,7 +60,7 @@ many rows it touched, plus the pending decisions from the overrides file.
 | W03 | Incidents in private `wetting_exclude` flagged | E.g. overnight accidents, likely different drivers |
 | M01 | One row per medication per dose, parsed | A dose record can list several medications |
 | M02 | Dose times kept, analysed at clock-block level | Times are best-available (weekday AM doses given at school); not minute-accurate |
-| M03 | Regimen changes derived from the dose log | Marks dose changes even with no context event. A day logging a strict subset of the regimen counts as incomplete logging, not a change |
+| M03 | Regimen changes derived from the dose log | Marks dose changes even with no context event. A day logging part of the regimen counts as incomplete logging, not a change, unless a dose is missing on 7 logged days running (`subset_change_days`) while the rest of that drug continues: then it has stopped, dated to the first logged day without it (e.g. a short-acting dose dropped while the long-acting one goes on) |
 | C01 | Context events → one row per day, inclusive | Blank end date = single day |
 | C02 | `days.day_excluded`: days inside a context event marked "leave out of insights" (reason in `day_exclude_reason`) | Stretches that aren't comparable (e.g. a trip abroad). Decided when the event is logged, never from how the numbers look. Flagged, not deleted; each analysis drops them and keeps them on the calendar so rolling windows don't bridge the gap |
 | D01 | One row per complete day; export day dropped | Partial days distort counts |
@@ -90,6 +90,8 @@ would produce, read with `load_tables`) and returns `insights.phase_line(result)
 - Days flagged by C02 are blanked (no rating, average, counts or sleep, including the night
   after the last one), kept on the calendar, and drawn as a hatched band.
   `phase_line(..., include_excluded=True)` plots them normally, for a look at what's hidden.
+- Wetting incidents per day (excluded ones left out, W03), with time, happened/noticed (W02),
+  setting and cleaned response (W01).
 - Sleep for each day is **the night before it** (bedtime D-1 → wake D, the same alignment as
   `sleep_prev_night_hr`), so a rough night sits under the day that followed. Clock values are
   minutes after midnight of the evening's date; nights with implausible latency (D03) are flagged.

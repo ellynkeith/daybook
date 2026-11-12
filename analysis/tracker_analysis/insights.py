@@ -88,6 +88,20 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
     first, last = D["date"].iloc[0], D["date"].iloc[-1]
     out["summary"].update(first_day=first, last_day=last)
 
+    # wetting incidents by day (cleaned responses, W01/W02; excluded incidents left out, W03)
+    W = result.tables["wetting"]
+    wet_by_day = {}
+    if len(W):
+        W = W[~W["excluded"]].sort_values(["entry_date", "time_min"], na_position="last")
+        for w in W.itertuples(index=False):
+            wet_by_day.setdefault(w.entry_date, []).append({
+                "time": w.incident_time[:5] or None,
+                "basis": w.time_basis,                    # "happened" or "noticed"
+                "basis_assumed": bool(w.time_basis_assumed),
+                "response": w.response or None,
+                "setting": w.setting or None,
+            })
+
     prev = prev.loc[D.index]
     wake = wake.loc[D.index]
     # the night before a hidden day, or after one (its bedtime belongs to it), is hidden too
@@ -119,6 +133,8 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
             "excluded": bool(r.day_excluded),
             "excluded_reason": _clean(r.day_exclude_reason) if r.day_excluded else None,
             "sleep": sleep,  # the night before this day; None if nothing logged
+            "sleep_left_out": bool(hn and not h),  # the night before belongs to a left-out stretch
+            "wetting": None if h else wet_by_day.get(r.date, []),
         })
 
     cd = result.tables["context_days"]
