@@ -1250,6 +1250,7 @@ function populateDailyFormForDate(dateStr) {
 }
 
 dailyDateInput.addEventListener('change', () => {
+  updateEditButtons();
   medicationStatus.textContent = '';
   medicationStatus.classList.remove('error');
   populateDailyFormForDate(dailyDateInput.value);
@@ -1290,6 +1291,16 @@ let editingWettingEntryDate = null;
 
 function fmtResponse(response) {
   return response === 'noncompliant' ? 'noncompliant' : response;
+}
+
+// While editing, the save buttons say when saving will also move the record
+// to the date now in the picker -- so a move is deliberate, never a surprise.
+function updateEditButtons() {
+  const d = dailyDateInput.value;
+  if (editingWettingId !== null)
+    addWettingBtn.textContent = d && d !== editingWettingEntryDate ? `Update and move to ${fmtShortDay(d)}` : 'Update incident';
+  if (editingMedicationId !== null)
+    addMedicationBtn.textContent = d && d !== editingMedicationEntryDate ? `Update and move to ${fmtShortDay(d)}` : 'Update dose';
 }
 
 function startEditWetting(w) {
@@ -1425,7 +1436,9 @@ addWettingBtn.addEventListener('click', async () => {
 
   const isEditingWetting = editingWettingId !== null;
   const payload = {
-    entry_date: isEditingWetting ? editingWettingEntryDate : dailyDateInput.value,
+    // The date picker IS the incident's date, editing or not: changing it moves the incident.
+    // (It used to be pinned to the original date, which made the date impossible to change.)
+    entry_date: dailyDateInput.value,
     incident_time: wettingTimeInput.value || null,
     setting: wettingSettingSelect.value || null,
     response: wettingResponseSelect.value,
@@ -1901,7 +1914,8 @@ addMedicationBtn.addEventListener('click', async () => {
 
   const isEditingMedication = editingMedicationId !== null;
   const payload = {
-    entry_date: isEditingMedication ? editingMedicationEntryDate : dailyDateInput.value,
+    // Same as wetting: the picker's date is the dose's date, so changing it moves the dose.
+    entry_date: dailyDateInput.value,
     taken_time: medicationTimeInput.value || null,
     medications: selectedMedications,
     notes: medicationNotesInput.value || null,
