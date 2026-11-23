@@ -250,7 +250,10 @@ def sufficiency(days: list[dict], med_changes: pd.DataFrame, partial_day: str | 
     within TRIAL_MAX_DAYS) and drugs in ignore_drugs. Left-out days count
     toward neither.
     """
-    out = {"target": target, "ignored_drugs": list(ignore_drugs), "segments": [], "current": None, "longest": None}
+    # only name ignored drugs that actually change in this data (the page mentions them)
+    present = set(med_changes["drug"]) if len(med_changes) else set()
+    out = {"target": target, "ignored_drugs": [d for d in ignore_drugs if d in present],
+           "segments": [], "current": None, "longest": None}
     if not days:
         return out
     first, last = days[0]["date"], days[-1]["date"]

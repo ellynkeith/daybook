@@ -2,6 +2,7 @@ import itertools
 import threading
 from datetime import date, timedelta
 
+from demo_backdrop import backdrop
 from models import (
     DEFAULT_CATEGORIES,
     DEFAULT_EVENT_CATEGORIES,
@@ -199,18 +200,18 @@ class DemoStore:
         seed_medication_doses = [
             dict(days_ago=0, taken_time="08:00", medications=["am meds", "vitamin d"], notes=None),
             dict(days_ago=0, taken_time="15:30", medications=["pm meds"], notes=None),
-            dict(days_ago=1, taken_time="08:05", medications=["am meds"], notes="Slightly late, hard time waking up."),
+            dict(days_ago=1, taken_time="08:05", medications=["am meds", "vitamin d"], notes="Slightly late, hard time waking up."),
             dict(days_ago=1, taken_time="15:30", medications=["pm meds"], notes=None, time_confirmed=False),
-            dict(days_ago=2, taken_time="08:00", medications=["am meds"], notes=None),
-            dict(days_ago=3, taken_time="08:00", medications=["am meds"], notes=None),
+            dict(days_ago=2, taken_time="08:00", medications=["am meds", "vitamin d"], notes=None),
+            dict(days_ago=3, taken_time="08:00", medications=["am meds", "vitamin d"], notes=None),
             dict(days_ago=3, taken_time="15:40", medications=["pm meds"], notes=None),
-            dict(days_ago=4, taken_time="08:00", medications=["am meds"], notes=None),
+            dict(days_ago=4, taken_time="08:00", medications=["am meds", "vitamin d"], notes=None),
             dict(days_ago=4, taken_time=None, medications=["pm meds"], notes="Napped through it.", skipped=True),
-            dict(days_ago=5, taken_time="08:10", medications=["am meds"], notes=None),
+            dict(days_ago=5, taken_time="08:10", medications=["am meds", "vitamin d"], notes=None),
             dict(days_ago=5, taken_time="15:30", medications=["pm meds"], notes=None),
-            dict(days_ago=7, taken_time="08:00", medications=["am meds"], notes=None),
+            dict(days_ago=7, taken_time="08:00", medications=["am meds", "vitamin d"], notes=None),
             dict(days_ago=7, taken_time="15:30", medications=["pm meds"], notes=None),
-            dict(days_ago=8, taken_time="08:00", medications=["am meds"], notes=None),
+            dict(days_ago=8, taken_time="08:00", medications=["am meds", "vitamin d"], notes=None),
             dict(days_ago=8, taken_time="15:30", medications=["pm meds"], notes=None),
         ]
         for row in seed_medication_doses:
@@ -228,6 +229,22 @@ class DemoStore:
             )
 
         self._seed_context_events(today)
+        self._seed_backdrop(today)
+
+    def _seed_backdrop(self, today):
+        """About two months of generated days behind the rows above (see demo_backdrop.py)."""
+        b = backdrop(today, set(self.daily_logs))
+        for row in b["entries"]:
+            self.entries.append({"id": self._next_id(), **row})
+        for row in b["daily"]:
+            self.daily_logs[row["entry_date"]] = {**row, "gaps_ok": None,
+                                                 "exercise_minutes": None, "exercise_type": None}
+        for row in b["wetting"]:
+            self.wetting_incidents.append({"id": self._next_id(), **row})
+        for row in b["doses"]:
+            self.medication_doses.append({"id": self._next_id(), **row})
+        for row in b["events"]:
+            self.context_events.append({"id": self._next_id(), **row})
 
     def _seed_context_events(self, today):
         seed = [

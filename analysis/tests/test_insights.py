@@ -228,6 +228,7 @@ class SufficiencyTests(unittest.TestCase):
         self.assertEqual([x["paired"] for x in out["days"]], [False, True, False, False, True])
         s = out["sufficiency"]
         self.assertEqual(s["target"], 60)
+        self.assertEqual(s["ignored_drugs"], [])   # no melatonin in this data: nothing to mention
         self.assertEqual([(g["start"], g["paired"]) for g in s["segments"]], [("2026-03-01", 2)])
 
     def test_segments_split_on_changes_but_not_melatonin_or_trials(self):

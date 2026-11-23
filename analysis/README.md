@@ -48,7 +48,7 @@ many rows it touched, plus the pending decisions from the overrides file.
 | Step | Rule | Why |
 |---|---|---|
 | E01 | Split `categories` / `situations` on `;` | Multi-select fields are exported as joined text |
-| E02 | Retired categories mapped (`good` → `good behavior`, plus private `category_map`) | Don't split counts across old and new names |
+| E02 | Retired categories mapped (`good` → `good behavior`, plus private `category_map`); a mapping to `""` drops the tag | Don't split counts across old and new names; drop a retired tag the entry's other tags already cover |
 | E03 | Entries in private `exclude_entries` flagged `excluded` | E.g. a day summary logged as an entry |
 | E04 | Intensity cleared on positive-only entries | Intensity is a severity scale; old positive entries carry a meaningless value |
 | E05 | Blank intensity / duration / logged-by / situation = missing, never 0 | "Not recorded" isn't "none" |
@@ -65,7 +65,7 @@ many rows it touched, plus the pending decisions from the overrides file.
 | C02 | `days.day_excluded`: days inside a context event marked "leave out of insights" (reason in `day_exclude_reason`) | Stretches that aren't comparable (e.g. a trip abroad). Decided when the event is logged, never from how the numbers look. Flagged, not deleted; each analysis drops them and keeps them on the calendar so rolling windows don't bridge the gap |
 | D01 | One row per complete day; export day dropped | Partial days distort counts |
 | D02 | Good-day-only days → rating 4, `rating_imputed` | Dropping them biases toward bad days. Check every result with and without |
-| D03 | Sleep: missing stays missing; latency and duration derived; implausible latency (>120 min or <0) flagged | Night D = bedtime D → wake D+1; blank fell-asleep uses bedtime as onset (flagged) |
+| D03 | Sleep: missing stays missing; latency and duration derived; implausible latency (>120 min or <0) flagged, unless the night is in private `sleep_confirmed` | Night D = bedtime D → wake D+1; blank fell-asleep uses bedtime as onset (flagged). A long night that was checked and is real keeps its latency but isn't flagged |
 | D04 | Blank night awakenings = missing | Before the "None" chip, blank meant "none or not recorded" |
 | D05 | Join everything onto days; `is_school_day`; `imputed_no_entries` | Excluded records left out; for backfilled days "good day" and "no entries" are one fact, not two |
 
@@ -77,6 +77,19 @@ with `is_school_day`.
 
 Shape documented in `tracker_analysis/overrides.py`; a fake example is in
 `overrides.example.json`. Unknown keys are rejected so typos fail loudly.
+
+| Key | Shape | Effect |
+|---|---|---|
+| `wetting_response` | `{incident_id: response}` | W01a |
+| `wetting_exclude` | `{incident_id: reason}` | W03 |
+| `exclude_entries` | `{entry_id: reason}` | E03 |
+| `category_map` | `{old: new}` (`""` drops) | E02 |
+| `sleep_exclude` | `{date: reason}` | That night's bedtime and fell-asleep set to missing (D03) |
+| `sleep_confirmed` | `{date: reason}` | That night's long latency kept, not flagged (D03) |
+| `pending` | `[str]` | Open decisions, printed on every build |
+
+Rule of thumb: if a record is wrong, fix it in the app; if it's right but shouldn't
+count (an overnight accident, a day summary logged as an entry), use an override.
 
 ## In the app (Insights tab)
 
@@ -97,6 +110,18 @@ would produce, read with `load_tables`) and returns `insights.phase_line(result)
   minutes after midnight of the evening's date; nights with implausible latency (D03) are flagged.
 - Today is passed as a partial day: its counts are incomplete, and a "stopped"
   medication dated today only means today's doses aren't logged yet, so it's dropped.
+- Per day, also: `zero_confirmed` (rated or "good day", no behavior entries, not today:
+  a real zero rather than a missing day), `n_positive`, `max_intensity`, `notes`,
+  `night_awakenings` (the night before, like sleep), `skipped_doses` and `paired`
+  (a real rating and the night before's sleep hours).
+- **`sufficiency`**: paired days per medication regimen, against a rough target of 60.
+  A regimen runs between medication-change dates (M03), except one-off trials
+  (started and stopped within 2 days) and changes to `SUFFICIENCY_IGNORE_DRUGS`
+  (melatonin: it shifts the sleep side, which a sleep → next-day comparison needs).
+  Returns every segment, the current one and the longest.
+- **`wetting_weeks`**: Mon–Sun weeks clipped to the plotted days, incidents split into
+  resisted / changed without a fight / other, with `logged_days` (not left out, not today,
+  and something recorded) so a part-logged week isn't read as a dry one.
 
 Overrides come from the `ANALYSIS_OVERRIDES` environment variable (the contents of
 `overrides.json`). Unset means generic rules only; invalid JSON or unknown keys are
