@@ -195,7 +195,49 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
                                "from": r[3] or None, "to": r[4] or None}
                               for r in mc.itertuples(index=False)]
     out["sufficiency"] = sufficiency(out["days"], result.tables["med_changes"], partial_day)
+    out["wetting_weeks"] = wetting_weeks(out["days"])
     return out
+
+
+# how a wetting incident went, collapsed for the weekly bars
+WET_GROUPS = {"noncompliant": "resisted", "compliant": "no_fight"}   # anything else -> "other"
+
+
+def wetting_weeks(days: list[dict]) -> list[dict]:
+    """Wetting incidents per Monday-Sunday week, split by response.
+
+    A day is "logged" when it isn't left out and something was recorded for it
+    (a rating or good-day check-in, a behavior entry, or a wetting incident):
+    on a day nobody logged, zero incidents means nothing. Each week carries its
+    logged-day count so a part-logged week isn't read as a dry one. Weeks are
+    clipped to the days in `days`; today counts as not yet complete.
+    """
+    weeks: dict[str, dict] = {}
+    for d in days:
+        day = pd.Timestamp(d["date"])
+        start = (day - pd.Timedelta(days=day.weekday())).date().isoformat()
+        w = weeks.setdefault(start, {"start": start, "end": d["date"], "days": 0, "logged_days": 0,
+                                     "excluded_days": 0, "partial": False,
+                                     "resisted": 0, "no_fight": 0, "other": 0, "total": 0})
+        w["end"] = d["date"]
+        w["days"] += 1
+        if d.get("excluded") and d.get("wetting") is None:
+            w["excluded_days"] += 1
+            continue
+        if d.get("partial"):
+            w["partial"] = True
+        wet = d.get("wetting") or []
+        logged = d.get("rating") is not None or bool(d.get("n_negative")) or bool(d.get("n_positive")) or bool(wet)
+        if logged and not d.get("partial"):
+            w["logged_days"] += 1
+        for inc in wet:
+            g = WET_GROUPS.get(inc.get("response") or "", "other")
+            w[g] += 1
+            w["total"] += 1
+    for w in weeks.values():
+        w["complete"] = w["days"] == 7 and w["logged_days"] == 7 and not w["partial"]
+        w["per_logged_day"] = round(w["total"] / w["logged_days"], 2) if w["logged_days"] else None
+    return list(weeks.values())
 
 
 def sufficiency(days: list[dict], med_changes: pd.DataFrame, partial_day: str | None = None,

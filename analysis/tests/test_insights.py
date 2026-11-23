@@ -249,3 +249,36 @@ class SufficiencyTests(unittest.TestCase):
         self.assertEqual(s["longest"]["start"], "2026-03-05")
         self.assertEqual(s["ignored_drugs"], ["melatonin"])
         json.dumps(out)
+
+
+class WettingWeeksTests(unittest.TestCase):
+    def test_weeks_split_by_response_and_count_logged_days(self):
+        # 2026-03-02 is a Monday. Ratings on 03-01..03-10, 03-05 unrated with nothing logged.
+        r = raw(["3", "3", "3", "3", "", "3", "3", "3", "3", "3"])
+        r["wetting_incidents"] = df([
+            ["1", "2026-03-01", "10:00:00", "false", "home", "noncompliant", "", "2026-03-01 15:00:00+00:00"],
+            ["2", "2026-03-03", "10:00:00", "false", "home", "compliant", "", "2026-03-03 15:00:00+00:00"],
+            ["3", "2026-03-03", "15:00:00", "true", "school", "not observed", "", "2026-03-03 21:00:00+00:00"],
+            ["4", "2026-03-09", "10:00:00", "false", "home", "compliant", "", "2026-03-09 15:00:00+00:00"],
+            ["5", "2026-03-10", "10:00:00", "false", "home", "noncompliant", "", "2026-03-10 15:00:00+00:00"]], W_COLS)
+        res = build(r, Overrides(wetting_exclude={"5": "overnight"}), Params(through="2026-03-10"))
+        weeks = phase_line(res, partial_day="2026-03-10")["wetting_weeks"]
+        self.assertEqual([w["start"] for w in weeks], ["2026-02-23", "2026-03-02", "2026-03-09"])
+        sun, wk, last = weeks
+        self.assertEqual((sun["days"], sun["resisted"], sun["total"]), (1, 1, 1))   # clipped to the one day shown
+        self.assertEqual((wk["resisted"], wk["no_fight"], wk["other"], wk["total"]), (0, 1, 1, 2))
+        self.assertEqual((wk["days"], wk["logged_days"]), (7, 6))                    # 03-05: nothing logged
+        self.assertFalse(wk["complete"])
+        self.assertEqual(wk["per_logged_day"], round(2 / 6, 2))
+        self.assertEqual(last["total"], 1)        # id 5 excluded (W03)
+        self.assertTrue(last["partial"])          # today is in it
+        self.assertEqual(last["logged_days"], 1)  # today doesn't count yet
+
+    def test_left_out_days_are_not_logged_days(self):
+        r = raw(["3"] * 7 + ["3"] * 7)  # 03-01 (Sun) .. 03-14
+        r["context_events"] = df([["1", "2026-03-03", "2026-03-05", "visitors/travel", "trip", "true",
+                                   "2026-03-03 00:00:00+00:00"]], C_COLS[:5] + ["exclude_from_insights", "created_at"])
+        weeks = phase_line(build(r, Overrides(), Params(through="2026-03-14")))["wetting_weeks"]
+        wk = weeks[1]
+        self.assertEqual((wk["excluded_days"], wk["logged_days"]), (3, 4))
+        json.dumps(weeks)

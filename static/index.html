@@ -918,6 +918,7 @@
         <button type="button" class="chip selected" data-panel="rating" aria-pressed="true">Day rating</button>
         <button type="button" class="chip selected" data-panel="entries" aria-pressed="true">Behavior</button>
         <button type="button" class="chip selected" data-panel="wetting" aria-pressed="true">Wetting</button>
+        <button type="button" class="chip selected" data-panel="wettingWeek" aria-pressed="true">Wetting by week</button>
         <button type="button" class="chip selected" data-panel="sleep" aria-pressed="true">Sleep</button>
       </div>
       <div class="chart-panel" data-panel="rating">
@@ -939,6 +940,10 @@
       <div class="chart-panel" data-panel="wetting">
       <div class="chart-label">Wetting incidents, one dot each: <span class="nw"><svg width="9" height="9"><circle cx="4.5" cy="4.5" r="4" fill="var(--chart-wet)"/></svg>resisted changing</span> <span class="nw"><svg width="9" height="9"><circle cx="4.5" cy="4.5" r="3.5" fill="var(--chart-wet)" fill-opacity="0.35" stroke="var(--chart-wet)" stroke-width="1"/></svg>changed without a fight</span> <span class="nw"><svg width="9" height="9"><circle cx="4.5" cy="4.5" r="3.4" fill="var(--paper)" stroke="var(--chart-wet)" stroke-width="1.5"/></svg>not seen / other</span></div>
       <div class="chart" id="wettingChart" tabindex="0" role="img" aria-label="Wetting incidents per day. Arrow keys step through days."></div>
+      </div>
+      <div class="chart-panel" data-panel="wettingWeek">
+      <div class="chart-label">Wetting incidents per week (Mon–Sun), same shading as above. Faded = not every day that week was logged.</div>
+      <div class="chart" id="wettingWeekChart" tabindex="0" role="img" aria-label="Wetting incidents per week. Arrow keys step through days."></div>
       </div>
       <div class="chart-panel" data-panel="sleep">
       <div class="chart-label">Sleep the night before: bar = asleep → woke up, thin line = in bed, not yet asleep</div>
@@ -3269,14 +3274,19 @@ const phaseChartEl = document.getElementById('phaseChart');
 const entriesChartEl = document.getElementById('entriesChart');
 const sleepChartEl = document.getElementById('sleepChart');
 const wettingChartEl = document.getElementById('wettingChart');
-const CHART_ELS = [phaseChartEl, entriesChartEl, wettingChartEl, sleepChartEl];
+const wettingWeekChartEl = document.getElementById('wettingWeekChart');
+const CHART_ELS = [phaseChartEl, entriesChartEl, wettingChartEl, wettingWeekChartEl, sleepChartEl];
 
 // Which charts are shown: a per-viewer convenience, remembered in this browser.
-const PANELS = ['rating', 'entries', 'wetting', 'sleep'];
+// Stored as the HIDDEN panels, so a panel added later starts out visible.
+const PANELS = ['rating', 'entries', 'wetting', 'wettingWeek', 'sleep'];
 let shownPanels = new Set(PANELS);
 try {
-  const saved = JSON.parse(localStorage.getItem('insightsPanels') || 'null');
-  if (Array.isArray(saved)) shownPanels = new Set(saved.filter(p => PANELS.includes(p)));
+  const hidden = JSON.parse(localStorage.getItem('insightsPanelsHidden') || 'null');
+  const oldShown = JSON.parse(localStorage.getItem('insightsPanels') || 'null');  // before 2026-11-23: the shown list
+  if (Array.isArray(hidden)) shownPanels = new Set(PANELS.filter(p => !hidden.includes(p)));
+  else if (Array.isArray(oldShown))
+    shownPanels = new Set(PANELS.filter(p => oldShown.includes(p) || !['rating', 'entries', 'wetting', 'sleep'].includes(p)));
 } catch (e) { /* storage unavailable: show everything */ }
 function applyPanels() {
   for (const el of document.querySelectorAll('.chart-panel')) el.hidden = !shownPanels.has(el.dataset.panel);
@@ -3291,7 +3301,7 @@ document.getElementById('panelToggles').addEventListener('click', ev => {
   if (!b) return;
   const p = b.dataset.panel;
   if (shownPanels.has(p)) shownPanels.delete(p); else shownPanels.add(p);
-  try { localStorage.setItem('insightsPanels', JSON.stringify([...shownPanels])); } catch (e) { /* fine */ }
+  try { localStorage.setItem('insightsPanelsHidden', JSON.stringify(PANELS.filter(x => !shownPanels.has(x)))); } catch (e) { /* fine */ }
   applyPanels();
   // a chart drawn while hidden has no width to measure, so redraw once it's visible
   if (insightsData) renderInsights();
@@ -3529,6 +3539,45 @@ function renderInsights() {
     crosshairs.push(svgEl('line', { x1: 0, x2: 0, y1: top4, y2: top4 + rowH * maxW, stroke: 'var(--ink)', 'stroke-width': 1, opacity: 0, 'pointer-events': 'none' }, svg4));
   }
 
+  // -------- wetting by week: one stacked bar per Mon-Sun week, spanning its days
+  wettingWeekChartEl.innerHTML = '';
+  {
+    const weeks = (phase.wetting_weeks || []).filter(w => w.end >= first && w.start <= last);
+    const maxT = Math.max(4, ...weeks.map(w => w.total));
+    const H5 = 92, top5 = 12, bottom5 = 4, plotH5 = H5 - top5 - bottom5;
+    const y5 = v => top5 + plotH5 - v / maxT * plotH5;
+    const svg5 = svgEl('svg', { viewBox: `0 0 ${W} ${H5}`, height: H5 }, wettingWeekChartEl);
+    drawLeftOut(svg5, top5, plotH5, false);
+    for (const v of [0, maxT]) {
+      svgEl('line', { x1: left, x2: W - right, y1: y5(v), y2: y5(v), stroke: 'var(--chart-grid)', 'stroke-width': 1 }, svg5);
+      const t = svgEl('text', { x: left - 8, y: y5(v) + 3.5, 'text-anchor': 'end' }, svg5);
+      t.textContent = v;
+    }
+    const gap = Math.min(3, step * 0.4);
+    for (const w of weeks) {
+      const i0 = w.start < first ? 0 : idx[w.start], i1 = w.end > last ? n - 1 : idx[w.end];
+      if (i0 == null || i1 == null || !w.total) continue;
+      const x0 = left + step * i0 + gap, bw = Math.max(1, step * (i1 - i0 + 1) - 2 * gap);
+      const g = svgEl('g', { opacity: w.complete ? 1 : 0.45 }, svg5);
+      let acc = 0;
+      // bottom to top: resisted (solid), changed without a fight (light), not seen / other (outline)
+      for (const [k, style] of [['resisted', { fill: 'var(--chart-wet)' }],
+                                ['no_fight', { fill: 'var(--chart-wet)', 'fill-opacity': 0.35 }],
+                                ['other', { fill: 'var(--paper)' }]]) {
+        if (!w[k]) continue;
+        const yt = y5(acc + w[k]), yb = y5(acc);
+        svgEl('rect', { x: x0, y: yt, width: bw, height: yb - yt, ...style,
+                        stroke: 'var(--chart-wet)', 'stroke-width': 1 }, g);
+        acc += w[k];
+      }
+      if (bw >= 16) {
+        const t = svgEl('text', { x: x0 + bw / 2, y: y5(w.total) - 3, 'text-anchor': 'middle' }, svg5);
+        t.textContent = w.total;
+      }
+    }
+    crosshairs.push(svgEl('line', { x1: 0, x2: 0, y1: top5, y2: top5 + plotH5, stroke: 'var(--ink)', 'stroke-width': 1, opacity: 0, 'pointer-events': 'none' }, svg5));
+  }
+
   // -------- sleep chart: the night before each day, on a clock axis.
   // Clock values are minutes after midnight of the previous evening's date,
   // so 21:00 = 1260 and 07:00 next morning = 1860.
@@ -3711,6 +3760,15 @@ function showTip(i) {
     else line('Behavior entries', d.zero_confirmed ? 'none (day was rated)' : 'none logged, day not rated', true);
   }
   if (d.n_positive) line('Good behavior', `${d.n_positive} entr${d.n_positive === 1 ? 'y' : 'ies'}`);
+  const wk = (insightsData.phase.wetting_weeks || []).find(w => w.start <= d.date && w.end >= d.date);
+  if (wk && wk.days - wk.excluded_days > 0) {
+    const parts = [['resisted changing', wk.resisted], ['changed without a fight', wk.no_fight], ['not seen / other', wk.other]]
+      .filter(p => p[1]).map(p => `${p[1]} ${p[0]}`);
+    const logged = wk.partial ? `${wk.logged_days} complete day${wk.logged_days === 1 ? '' : 's'} so far`
+                              : `${wk.logged_days} of ${wk.days} days logged` + (wk.days < 7 ? ' (only part of this week is charted)' : '');
+    line(`Week of ${fmtTick(wk.start)}`, `${wk.total} wetting incident${wk.total === 1 ? '' : 's'}` +
+         (parts.length ? ` (${parts.join(', ')})` : '') + ` · ${logged}`, !wk.complete);
+  }
   if (d.wetting) {
     if (!d.wetting.length) line('Wetting', 'none logged', true);
     for (const w of d.wetting) line('Wetting', wettingText(w));
