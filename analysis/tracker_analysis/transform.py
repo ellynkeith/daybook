@@ -149,9 +149,12 @@ class _Builder:
 
         cmap = {**RETIRED_CATEGORY_MAP, **self.ov.category_map}
         changed = e["categories"].map(lambda cs: any(c in cmap for c in cs))
-        e["categories"] = e["categories"].map(lambda cs: list(dict.fromkeys(cmap.get(c, c) for c in cs)))
+        # a mapping to "" / None drops the category (e.g. a retired tag the entry's other tags already cover)
+        e["categories"] = e["categories"].map(
+            lambda cs: list(dict.fromkeys(m for m in (cmap.get(c, c) for c in cs) if m)))
         self.rec("E02", "Map retired categories",
-                 "Retired names (e.g. 'good') are merged into their current equivalent so counts aren't split.",
+                 "Retired names (e.g. 'good') are merged into their current equivalent so counts aren't split; "
+                 "a mapping to nothing drops the tag.",
                  changed.sum(), f"mapping: {cmap}")
 
         e["excluded"] = e["id"].isin(self.ov.exclude_entries)
@@ -385,13 +388,15 @@ class _Builder:
         D["night_sleep_hr"] = (wake_next - onset) / 60
         D["night_onset_from_bedtime"] = fell.isna() & bed.notna()
         D["sleep_prev_night_hr"] = D["night_sleep_hr"].shift(1)
-        D["sleep_implausible"] = (D["sleep_latency_min"] > self.p.latency_implausible_min) | (D["sleep_latency_min"] < 0)
+        D["sleep_implausible"] = ((D["sleep_latency_min"] > self.p.latency_implausible_min) | (D["sleep_latency_min"] < 0)) \
+            & ~D["date"].isin(self.ov.sleep_confirmed)   # long but checked and real
         self.rec("D03", "Sleep: missing stays missing; derive latency and duration",
                  "Decision 2026-10-21: unremembered sleep times are not filled. Night D = bedtime D -> wake "
                  "D+1; when fell-asleep is blank, bedtime is used as onset (flagged). sleep_prev_night_hr is "
                  "the lagged predictor for day D.", int(D["night_sleep_hr"].isna().sum()),
                  f"implausible latency on {D.loc[D['sleep_implausible'], 'date'].tolist()}; "
-                 f"excluded by override: {D.loc[excl, 'date'].tolist()}")
+                 f"excluded by override: {D.loc[excl, 'date'].tolist()}; "
+                 f"confirmed real: {sorted(d for d in self.ov.sleep_confirmed if d in set(D['date']))}")
 
         D["night_awakenings"] = _num(D["night_awakenings"])
         self.rec("D04", "Night awakenings: blank is missing, not 0",

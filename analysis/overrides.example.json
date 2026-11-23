@@ -3,7 +3,8 @@
   "wetting_response": {"101": "compliant"},
   "wetting_exclude": {"102": "overnight accident"},
   "exclude_entries": {"201": "day summary logged as an entry"},
-  "category_map": {"old name": "current name"},
+  "category_map": {"old name": "current name", "retired tag covered by the others": ""},
   "sleep_exclude": {"2026-01-03": "typo, can't recover"},
+  "sleep_confirmed": {"2026-01-04": "long time to fall asleep, but real"},
   "pending": ["Example open decision"]
 }

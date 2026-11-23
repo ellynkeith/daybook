@@ -181,3 +181,24 @@ class OverridesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OverrideExtrasTests(unittest.TestCase):
+    def test_category_mapped_to_nothing_is_dropped(self):
+        r = build(raw(), Overrides(category_map={"defiant": ""}), Params(through="2026-01-07"))
+        e = r.tables["entries"].set_index("id")
+        self.assertEqual(e.loc["1", "categories"], ["good behavior"])
+        self.assertEqual(e.loc["3", "categories"], [])
+
+    def test_sleep_confirmed_is_not_flagged(self):
+        rw = raw()
+        rw["daily"].loc[0, "fell_asleep_time"] = "23:30:00"   # 210 min after bed
+        flagged = build(rw, Overrides(), Params(through="2026-01-07")).tables["days"].set_index("date")
+        self.assertTrue(flagged.loc["2026-01-05", "sleep_implausible"])
+        ok = build(rw, Overrides(sleep_confirmed={"2026-01-05": "real"}), Params(through="2026-01-07")).tables["days"].set_index("date")
+        self.assertFalse(ok.loc["2026-01-05", "sleep_implausible"])
+        self.assertEqual(ok.loc["2026-01-05", "sleep_latency_min"], 210)   # kept, just not flagged
+
+    def test_example_file_loads(self):
+        import pathlib
+        Overrides.load(pathlib.Path(__file__).parent.parent / "overrides.example.json")

@@ -12,8 +12,10 @@ Keys (all optional):
   wetting_response    {incident_id: response}      applied before the generic "other" rule
   wetting_exclude     {incident_id: reason}        dropped from daytime-wetting analysis
   exclude_entries     {entry_id: reason}           dropped from behavior entries
-  category_map        {old_category: new_category} extra mappings on top of the generic ones
+  category_map        {old_category: new_category} extra mappings on top of the generic ones;
+                                                   "" or null drops the category from the entry
   sleep_exclude       {date: reason}               sleep values for that night set to missing
+  sleep_confirmed     {date: reason}               a long bed -> asleep gap checked and real: not flagged
   pending             [str, ...]                   open decisions, printed on every build
 """
 from __future__ import annotations
@@ -30,6 +32,7 @@ class Overrides:
     exclude_entries: dict[str, str] = field(default_factory=dict)
     category_map: dict[str, str] = field(default_factory=dict)
     sleep_exclude: dict[str, str] = field(default_factory=dict)
+    sleep_confirmed: dict[str, str] = field(default_factory=dict)
     pending: list[str] = field(default_factory=list)
     source: str = "(none)"
 
