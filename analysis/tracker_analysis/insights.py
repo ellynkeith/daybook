@@ -18,6 +18,19 @@ from .transform import Result
 WINDOW = 7
 MIN_DAYS = 4
 
+# Data sufficiency: days with a real rating (not a good-day check-in) AND the
+# previous night's sleep, counted within one medication regimen. About 60 is
+# where a day-level sleep/behavior comparison inside one regimen starts to be
+# worth trying; it is a rough planning number, not a power calculation.
+SUFFICIENCY_TARGET = 60
+# A drug started and stopped within this many days is a one-off trial (e.g. a
+# single dose), not a new regimen, so it doesn't split the stretch.
+TRIAL_MAX_DAYS = 2
+# Changes to these don't start a new regimen for this count: they move the
+# sleep side of a sleep -> next-day comparison (the variation it needs) rather
+# than acting on daytime behavior directly. The page says so.
+SUFFICIENCY_IGNORE_DRUGS = ("melatonin",)
+
 
 def _clean(v):
     if v is None:
@@ -68,6 +81,9 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
     # Days are consecutive, so shift(1) is "the previous evening".
     prev = D[["bedtime_min", "fell_asleep_min", "sleep_latency_min", "night_sleep_hr",
               "sleep_implausible", "night_onset_from_bedtime"]].shift(1)
+    for c in ("n_entries", "n_skipped_doses"):
+        if c not in D:
+            D[c] = 0
     wake = D["wake_min"] + 1440
 
     rated = D["rating_filled"].notna()
@@ -89,6 +105,13 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
     out["summary"].update(first_day=first, last_day=last)
 
     # wetting incidents by day (cleaned responses, W01/W02; excluded incidents left out, W03)
+    # skipped doses by day, by name (the readout lists them)
+    Z = result.tables.get("doses", pd.DataFrame())
+    skipped_by_day = {}
+    if len(Z) and "skipped" in Z:
+        for z in Z[Z["skipped"].astype(bool)].itertuples(index=False):
+            skipped_by_day.setdefault(z.entry_date, []).append(z.medication)
+
     W = result.tables["wetting"]
     wet_by_day = {}
     if len(W):
@@ -119,6 +142,8 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
                 "flagged": bool(p["sleep_implausible"]) if pd.notna(p["sleep_implausible"]) else False,
                 "onset_is_bedtime": bool(p["night_onset_from_bedtime"]) if pd.notna(p["night_onset_from_bedtime"]) else False,
             }
+        rated_day = pd.notna(r.rating_filled) and not h
+        n_neg = int(r.n_negative) if "n_negative" in D else 0
         out["days"].append({
             "date": r.date,
             "rating": _clean(r.rating_filled),
@@ -135,6 +160,16 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
             "sleep": sleep,  # the night before this day; None if nothing logged
             "sleep_left_out": bool(hn and not h),  # the night before belongs to a left-out stretch
             "wetting": None if h else wet_by_day.get(r.date, []),
+            # A rated day (or good-day check-in) with no behavior entries is a
+            # real zero, not a missing day (Ellyn, 2026-11-23). Today can't be.
+            "zero_confirmed": bool(rated_day and n_neg == 0 and r.date != partial_day),
+            "notes": None if h or not isinstance(getattr(r, "day_notes", None), str) else (r.day_notes.strip() or None),
+            # logged on D with the wake time, so it describes the night before D (same as "sleep")
+            "night_awakenings": None if hn else _clean(getattr(r, "night_awakenings", None)),
+            "skipped_doses": None if h else skipped_by_day.get(r.date, []),
+            # counts toward sufficiency: a real rating and the night before's sleep hours
+            "paired": bool(not h and not hn and r.date != partial_day and pd.notna(r.rating)
+                           and sleep is not None and sleep["hours"] is not None),
         })
 
     cd = result.tables["context_days"]
@@ -159,4 +194,52 @@ def phase_line(result: Result, partial_day: str | None = None, include_excluded:
         out["med_changes"] = [{"date": r.date, "drug": r.drug, "change": r.change,
                                "from": r[3] or None, "to": r[4] or None}
                               for r in mc.itertuples(index=False)]
+    out["sufficiency"] = sufficiency(out["days"], result.tables["med_changes"], partial_day)
+    return out
+
+
+def sufficiency(days: list[dict], med_changes: pd.DataFrame, partial_day: str | None = None,
+                target: int = SUFFICIENCY_TARGET,
+                ignore_drugs: tuple[str, ...] = SUFFICIENCY_IGNORE_DRUGS) -> dict:
+    """Paired days (real rating + the night before's sleep) per medication regimen.
+
+    A regimen is the stretch between two medication-change dates. Every change
+    splits it, melatonin included, except one-off trials (started and stopped
+    within TRIAL_MAX_DAYS) and drugs in ignore_drugs. Left-out days count
+    toward neither.
+    """
+    out = {"target": target, "ignored_drugs": list(ignore_drugs), "segments": [], "current": None, "longest": None}
+    if not days:
+        return out
+    first, last = days[0]["date"], days[-1]["date"]
+    mc = med_changes
+    if len(mc):
+        mc = mc[~mc["drug"].isin(ignore_drugs)]
+        if partial_day:
+            mc = mc[~((mc["change"] == "stopped") & (mc["date"] >= partial_day))]
+        trials = set()
+        for drug, g in mc.groupby("drug"):
+            st = g[g["change"] == "started"]["date"]
+            sp = g[g["change"] == "stopped"]["date"]
+            for a in st:
+                b = sp[sp >= a]
+                if len(b) and (pd.Timestamp(b.min()) - pd.Timestamp(a)).days <= TRIAL_MAX_DAYS:
+                    trials |= {(drug, a), (drug, b.min())}
+        mc = mc[[(d, t) not in trials for d, t in zip(mc["drug"], mc["date"])]]
+    cuts = sorted({d for d in mc["date"] if first < d <= last}) if len(mc) else []
+    bounds = [first] + cuts
+    for k, start in enumerate(bounds):
+        end_excl = bounds[k + 1] if k + 1 < len(bounds) else None
+        seg = [d for d in days if d["date"] >= start and (end_excl is None or d["date"] < end_excl)]
+        changes = mc[mc["date"] == start] if len(mc) and k > 0 else mc.iloc[0:0] if len(mc) else None
+        out["segments"].append({
+            "start": start, "end": seg[-1]["date"] if seg else start,
+            "days": len(seg),
+            "paired": sum(1 for d in seg if d["paired"]),
+            "changes": [] if changes is None else
+                       [{"drug": r.drug, "change": r.change, "from": r[3] or None, "to": r[4] or None}
+                        for r in changes.itertuples(index=False)],
+        })
+    out["current"] = out["segments"][-1]
+    out["longest"] = max(out["segments"], key=lambda s: (s["paired"], s["start"]))
     return out

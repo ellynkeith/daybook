@@ -186,3 +186,66 @@ class ExcludedPeriodTests(unittest.TestCase):
         self.assertIsNotNone(d["2026-03-09"]["sleep"])
         self.assertIsNone(d["2026-03-05"]["sleep"])     # ends on the trip's first morning
         self.assertIsNotNone(d["2026-03-04"]["sleep"])  # last night before the trip
+
+
+def dose(i, day, meds, skipped="false"):
+    return [str(i), day, "08:00:00", "", meds, skipped, "", f"{day} 13:00:00+00:00"]
+
+
+class DayExtrasTests(unittest.TestCase):
+    def test_zero_confirmed(self):
+        # 03-02 has the one behavior entry; 03-03 good-day only; 03-04 unrated; 03-05 today
+        res = build(raw(["3", "3", "g", "", "3"]), Overrides(), Params(through="2026-03-05"))
+        d = phase_line(res, partial_day="2026-03-05")["days"]
+        self.assertEqual([x["zero_confirmed"] for x in d], [True, False, True, False, False])
+
+    def test_notes_awakenings_and_skipped(self):
+        r = raw(["3", "3", "3"])
+        r["daily"].loc[0, "day_notes"] = "  quiet day "
+        r["daily"].loc[1, "day_notes"] = "   "
+        r["daily"].loc[1, "night_awakenings"] = "2"
+        r["medication_doses"] = df([dose(1, "2026-03-01", "drugA 1mg"),
+                                    dose(2, "2026-03-02", "drugA 1mg", skipped="true"),
+                                    dose(3, "2026-03-03", "drugA 1mg")], M_COLS)
+        d = phase_line(build(r, Overrides(), Params(through="2026-03-03")))["days"]
+        self.assertEqual([x["notes"] for x in d], ["quiet day", None, None])
+        self.assertEqual([x["night_awakenings"] for x in d], [None, 2, None])
+        self.assertEqual(d[1]["skipped_doses"], ["drugA 1mg"])
+        self.assertEqual(d[0]["skipped_doses"], [])
+        json.dumps(d)
+
+
+class SufficiencyTests(unittest.TestCase):
+    def build(self, ratings, doses):
+        sleep = {i: ("07:00:00", "21:00:00", "21:30:00") for i in range(len(ratings))}
+        n = len(ratings)
+        res = build(raw(ratings, doses, sleep), Overrides(), Params(through=f"2026-03-{n:02d}"))
+        return phase_line(res)
+
+    def test_paired_needs_real_rating_and_night_before(self):
+        out = self.build(["3", "3", "g", "", "4"], [])
+        # day 1 has no night before; day 3 is good-day only; day 4 unrated
+        self.assertEqual([x["paired"] for x in out["days"]], [False, True, False, False, True])
+        s = out["sufficiency"]
+        self.assertEqual(s["target"], 60)
+        self.assertEqual([(g["start"], g["paired"]) for g in s["segments"]], [("2026-03-01", 2)])
+
+    def test_segments_split_on_changes_but_not_melatonin_or_trials(self):
+        doses = []
+        for i in range(1, 9):
+            day = f"2026-03-{i:02d}"
+            doses.append(dose(len(doses) + 1, day, "drugA 1mg" if i < 5 else "drugA 2mg"))   # change 03-05
+            doses.append(dose(len(doses) + 1, day, "melatonin 1mg" if i < 3 else "melatonin 2mg"))  # ignored
+        doses.append(dose(len(doses) + 1, "2026-03-07", "drugB 5mg"))  # one-day trial: started, stopped next day
+        out = self.build(["3"] * 8, doses)
+        drugs = {m["drug"] for m in out["med_changes"]}
+        self.assertIn("melatonin", drugs)   # still shown on the chart
+        self.assertIn("drugB", drugs)
+        s = out["sufficiency"]
+        self.assertEqual([(g["start"], g["end"], g["days"], g["paired"]) for g in s["segments"]],
+                         [("2026-03-01", "2026-03-04", 4, 3), ("2026-03-05", "2026-03-08", 4, 4)])
+        self.assertEqual([c["drug"] for c in s["segments"][1]["changes"]], ["drugA"])
+        self.assertEqual(s["current"]["start"], "2026-03-05")
+        self.assertEqual(s["longest"]["start"], "2026-03-05")
+        self.assertEqual(s["ignored_drugs"], ["melatonin"])
+        json.dumps(out)

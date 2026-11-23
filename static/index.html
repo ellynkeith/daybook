@@ -158,6 +158,11 @@
   .chart-tip .muted { color: var(--ink-soft); }
   .chart-tip div + div { margin-top: 2px; }
   .insight-note { font-size: 0.8rem; color: var(--ink-soft); margin: 12px 0 8px; }
+  .suff { margin: 14px 0 4px; font-size: 0.8rem; line-height: 1.45; }
+  .suff-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .suff-meter { flex: 0 0 120px; height: 6px; border-radius: 3px; background: var(--chart-grid); overflow: hidden; }
+  .suff-meter > span { display: block; height: 100%; background: var(--chart-sleep); }
+  .suff .muted { color: var(--ink-soft); }
   .insight-warn { font-size: 0.8rem; color: var(--danger); margin: 0 0 8px; }
   details.insight-table summary { font-size: 0.8rem; color: var(--teal); cursor: pointer; }
   .insight-table table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; }
@@ -928,7 +933,7 @@
       <div class="chart" id="phaseChart" tabindex="0" role="img" aria-label="Day rating chart. Use the left and right arrow keys to step through days."></div>
       </div>
       <div class="chart-panel" data-panel="entries">
-      <div class="chart-label">Behavior entries per day (good-behavior entries not counted)</div>
+      <div class="chart-label">Behavior entries per day (good-behavior entries not counted). Darker = higher intensity that day: <span class="nw"><svg width="34" height="9"><rect x="0" y="0" width="6" height="9" fill="var(--chart-bar)" opacity="0.4"/><rect x="7" y="0" width="6" height="9" fill="var(--chart-bar)" opacity="0.55"/><rect x="14" y="0" width="6" height="9" fill="var(--chart-bar)" opacity="0.7"/><rect x="21" y="0" width="6" height="9" fill="var(--chart-bar)" opacity="0.85"/><rect x="28" y="0" width="6" height="9" fill="var(--chart-bar)"/></svg>1–5</span> <span class="nw"><svg width="10" height="9"><line x1="1" y1="7.5" x2="9" y2="7.5" stroke="var(--ink-soft)" stroke-width="2" stroke-linecap="round"/></svg>rated, none logged</span></div>
       <div class="chart" id="entriesChart" tabindex="0" role="img" aria-label="Behavior entries per day. Arrow keys step through days."></div>
       </div>
       <div class="chart-panel" data-panel="wetting">
@@ -940,6 +945,7 @@
       <div class="chart" id="sleepChart" tabindex="0" role="img" aria-label="Sleep the night before each day. Arrow keys step through days."></div>
       </div>
       <div class="chart-tip" id="chartTip" aria-live="polite"></div>
+      <div class="suff" id="sufficiency" hidden></div>
       <p class="insight-note" id="phaseNote"></p>
       <details class="insight-table">
         <summary>Show as table</summary>
@@ -1236,6 +1242,7 @@ function fmtDailySummary(log) {
 }
 
 function populateDailyFormForDate(dateStr) {
+  updateEditButtons();   // every date change goes through here
   const log = dailyLogMap[dateStr];
   wakeTimeInput.value = log && log.wake_time ? log.wake_time.slice(0, 5) : '';
   bedtimeInput.value = log && log.bedtime ? log.bedtime.slice(0, 5) : '';
@@ -1250,7 +1257,6 @@ function populateDailyFormForDate(dateStr) {
 }
 
 dailyDateInput.addEventListener('change', () => {
-  updateEditButtons();
   medicationStatus.textContent = '';
   medicationStatus.classList.remove('error');
   populateDailyFormForDate(dailyDateInput.value);
@@ -1293,15 +1299,24 @@ function fmtResponse(response) {
   return response === 'noncompliant' ? 'noncompliant' : response;
 }
 
-// While editing, the save buttons say when saving will also move the record
-// to the date now in the picker -- so a move is deliberate, never a surprise.
+// The save buttons always say which day they'll save to when it isn't the
+// obvious one: while editing, when saving will also move the record to the
+// date now in the picker; when adding, when the picker isn't on today (it
+// stays wherever it was left -- after filling in an earlier day, or in a tab
+// left open overnight). Either way the date is deliberate, never a surprise.
 function updateEditButtons() {
   const d = dailyDateInput.value;
-  if (editingWettingId !== null)
-    addWettingBtn.textContent = d && d !== editingWettingEntryDate ? `Update and move to ${fmtShortDay(d)}` : 'Update incident';
-  if (editingMedicationId !== null)
-    addMedicationBtn.textContent = d && d !== editingMedicationEntryDate ? `Update and move to ${fmtShortDay(d)}` : 'Update dose';
+  const other = d && d !== todayStr();
+  addWettingBtn.textContent = editingWettingId !== null
+    ? (d && d !== editingWettingEntryDate ? `Update and move to ${fmtShortDay(d)}` : 'Update incident')
+    : (other ? `Add to ${fmtShortDay(d)}` : 'Add incident');
+  addMedicationBtn.textContent = editingMedicationId !== null
+    ? (d && d !== editingMedicationEntryDate ? `Update and move to ${fmtShortDay(d)}` : 'Update dose')
+    : (other ? `Add to ${fmtShortDay(d)}` : 'Add dose');
 }
+// a tab left open past midnight: "today" moved, so the labels may need to change
+document.addEventListener('visibilitychange', () => { if (!document.hidden) updateEditButtons(); });
+window.addEventListener('focus', updateEditButtons);
 
 function startEditWetting(w) {
   showTab('log');
@@ -1331,7 +1346,7 @@ function startEditWetting(w) {
 function endEditWetting() {
   editingWettingId = null;
   editingWettingEntryDate = null;
-  addWettingBtn.textContent = 'Add incident';
+  updateEditButtons();
   cancelWettingEditBtn.hidden = true;
 }
 
@@ -1647,7 +1662,7 @@ function endEditMedication() {
   editingMedicationOriginal = null;
   editingMedicationId = null;
   editingMedicationEntryDate = null;
-  addMedicationBtn.textContent = 'Add dose';
+  updateEditButtons();
   cancelMedicationEditBtn.hidden = true;
 }
 
@@ -3322,6 +3337,8 @@ function fmtTick(dateStr) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+const INTENSITY_OPACITY = [0.4, 0.55, 0.7, 0.85, 1];
+
 function fmtNum(v) { return v == null ? '–' : (Math.round(v * 10) / 10).toFixed(1); }
 
 function renderInsights() {
@@ -3475,7 +3492,17 @@ function renderInsights() {
     const rr = Math.min(rad, yb - yt);
     // rounded data end, square at the baseline
     const path = `M${x0} ${yb} L${x0} ${yt + rr} Q${x0} ${yt} ${x0 + rr} ${yt} L${x1 - rr} ${yt} Q${x1} ${yt} ${x1} ${yt + rr} L${x1} ${yb} Z`;
-    svgEl('path', { d: path, fill: 'var(--chart-bar)', opacity: d.partial ? 0.45 : 1 }, svg2);
+    // shade by the day's highest intensity (1 light .. 5 full); no intensity logged -> middle
+    const shade = d.max_intensity != null ? INTENSITY_OPACITY[Math.min(5, Math.max(1, Math.round(d.max_intensity))) - 1] : 0.7;
+    svgEl('path', { d: path, fill: 'var(--chart-bar)', opacity: d.partial ? shade * 0.5 : shade }, svg2);
+  });
+  // rated days with nothing logged are a real zero: a short mark on the baseline,
+  // so they don't look the same as days nobody logged
+  const zw = Math.max(2, Math.min(barW, 10));
+  days.forEach((d, i) => {
+    if (!d.zero_confirmed) return;
+    svgEl('line', { x1: xc(i) - zw / 2, x2: xc(i) + zw / 2, y1: y2(0) - 1.5, y2: y2(0) - 1.5,
+                    stroke: 'var(--ink-soft)', 'stroke-width': 2, 'stroke-linecap': step >= 4 ? 'round' : 'butt' }, svg2);
   });
   crosshairs.push(svgEl('line', { x1: 0, x2: 0, y1: top2, y2: top2 + plotH2, stroke: 'var(--ink)', 'stroke-width': 1, opacity: 0, 'pointer-events': 'none' }, svg2));
 
@@ -3567,7 +3594,43 @@ function renderInsights() {
       : ` ${s.excluded_days} day${s.excluded_days === 1 ? ' is' : 's are'} left out (${reasons}): hatched on the charts and not used in any average.`;
   }
   document.getElementById('phaseNote').textContent = note;
+  renderSufficiency(phase.sufficiency);
   renderPhaseTable(days, events, meds);
+}
+
+// How close the data is to supporting a sleep -> next-day comparison within one
+// medication regimen (see analysis insights.sufficiency).
+function renderSufficiency(suf) {
+  const el = document.getElementById('sufficiency');
+  el.textContent = '';
+  if (!suf || !suf.current) { el.hidden = true; return; }
+  el.hidden = false;
+  const cur = suf.current, longest = suf.longest;
+  const fmtRange = g => fmtTick(g.start) + (g.end !== g.start ? ' – ' + fmtTick(g.end) : '');
+  const head = document.createElement('div');
+  head.className = 'suff-head';
+  const b = document.createElement('b');
+  b.textContent = `Sleep vs next-day rating: ${cur.paired} of ~${suf.target} days`;
+  const meter = document.createElement('span');
+  meter.className = 'suff-meter';
+  meter.setAttribute('role', 'img');
+  meter.setAttribute('aria-label', `${cur.paired} of about ${suf.target} days`);
+  const fill = document.createElement('span');
+  fill.style.width = Math.min(100, cur.paired / suf.target * 100) + '%';
+  meter.append(fill);
+  head.append(b, meter);
+  el.append(head);
+  const why = cur.changes.length ? cur.changes.map(medText).join(', ') : 'start of tracking';
+  const p = document.createElement('div');
+  p.className = 'muted';
+  let text = `Days since ${fmtTick(cur.start)} (${why}) with a real rating and the night before's sleep.`;
+  if (longest && longest.start !== cur.start)
+    text += ` Most in one regimen so far: ${longest.paired} (${fmtRange(longest)}).`;
+  text += ` Around ${suf.target} is when the comparison is worth trying; before that, a pattern is a hunch.`;
+  if (suf.ignored_drugs && suf.ignored_drugs.length)
+    text += ` ${suf.ignored_drugs.map(x => x[0].toUpperCase() + x.slice(1)).join(', ')} changes don't restart the count.`;
+  p.textContent = text;
+  el.append(p);
 }
 
 function dayContext(i) {
@@ -3643,12 +3706,19 @@ function showTip(i) {
   if (!hidden) line('7-day average', d.mean == null ? 'not enough rated days' : fmtNum(d.mean) + ratedOnly, d.mean == null);
   if (d.excluded) line('Left out of insights', (d.excluded_reason || 'marked in the context log') +
                        (insightsData.phase.include_excluded ? ' (shown because "Show left-out days" is on)' : ''), true);
-  if (d.n_negative != null) line('Behavior entries', d.n_negative + (d.max_intensity != null ? ` (max intensity ${d.max_intensity})` : ''));
+  if (d.n_negative != null) {
+    if (d.n_negative) line('Behavior entries', d.n_negative + (d.max_intensity != null ? ` (max intensity ${d.max_intensity})` : ''));
+    else line('Behavior entries', d.zero_confirmed ? 'none (day was rated)' : 'none logged, day not rated', true);
+  }
+  if (d.n_positive) line('Good behavior', `${d.n_positive} entr${d.n_positive === 1 ? 'y' : 'ies'}`);
   if (d.wetting) {
     if (!d.wetting.length) line('Wetting', 'none logged', true);
     for (const w of d.wetting) line('Wetting', wettingText(w));
   }
   if (!hidden) for (const t of sleepText(d.sleep, d)) line(t[0], t[1], t[2]);
+  if (d.night_awakenings) line('Woke in the night', `${d.night_awakenings} time${d.night_awakenings === 1 ? '' : 's'}`);
+  if (d.skipped_doses && d.skipped_doses.length) line('Skipped', d.skipped_doses.join(', '));
+  if (d.notes) line('Day notes', d.notes);
   for (const e of ev) line('Context', e.category + (e.description ? ': ' + e.description : ''));
   for (const m of md) line('Medication', medText(m));
 
@@ -3728,7 +3798,7 @@ function renderPhaseTable(days, events, meds) {
     const cells = [
       [fmtShortDay(d.date) + (d.partial ? ' (today)' : ''), false],
       [d.excluded && !insightsData.phase.include_excluded ? 'left out' : (d.rating == null ? '–' : (d.imputed ? '4*' : String(d.rating))), true],
-      [fmtNum(d.mean), true], [fmtNum(d.mean_rated), true], [d.n_negative == null ? '–' : String(d.n_negative), true],
+      [fmtNum(d.mean), true], [fmtNum(d.mean_rated), true], [d.n_negative == null || (!d.n_negative && !d.zero_confirmed) ? '–' : String(d.n_negative), true],
       [d.wetting == null ? '–' : String(d.wetting.length), true],
       [d.sleep && d.sleep.hours != null ? fmtHours(d.sleep.hours) + (d.sleep.flagged ? ' ?' : '') : '–', true],
       [[...ev.map(e => e.category + (e.description ? ': ' + e.description : '')), ...md.map(medText)].join('; '), false],
@@ -3759,6 +3829,7 @@ async function loadWhoami() {
 
 (async function init() {
   dailyDateInput.value = todayStr();
+  updateEditButtons();
   if (tabFromHash()) applyTab(tabFromHash());
   await loadWhoami();
   if (!currentTab) applyTab(defaultTab());
